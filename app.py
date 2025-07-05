@@ -19,6 +19,7 @@ import asyncio
 import aiohttp
 import os
 from pathlib import Path
+import time # Added for retry logic
 
 st.set_page_config(page_title="📈 Stock Intelligence Terminal", layout="wide")
 
@@ -31,9 +32,72 @@ except FileNotFoundError:
 
 st.title("📊 Stock Intelligence Terminal")
 
+# --------------- Compliance & Regulatory Notice ---------------
+st.sidebar.markdown("---")
+st.sidebar.markdown("**⚠️ REGULATORY COMPLIANCE**")
+st.sidebar.info("""
+**SEBI & Exchange Guidelines:**
+- Data is for educational/research purposes only
+- Not investment advice or recommendations
+- Delayed data feeds (15-20 min delay)
+- Users must comply with local regulations
+- No real-time trading execution
+""")
+
+# --------------- Multi-Asset Symbol Management ---------------
+ASSET_CLASSES = {
+    'Equities': {'prefix': '', 'examples': ['AAPL', 'MSFT', 'GOOGL']},
+    'Futures': {'prefix': 'F:', 'examples': ['ES=F', 'NQ=F', 'YM=F', 'GC=F']},
+    'Forex': {'prefix': 'FX:', 'examples': ['EURUSD=X', 'GBPUSD=X', 'USDJPY=X']},
+    'Crypto': {'prefix': 'C:', 'examples': ['BTC-USD', 'ETH-USD', 'ADA-USD']},
+    'Commodities': {'prefix': 'COM:', 'examples': ['CL=F', 'NG=F', 'ZC=F']}
+}
+
+def parse_symbol(symbol: str):
+    """Parse symbol and return asset class and clean symbol."""
+    symbol = symbol.upper().strip()
+    
+    # Crypto detection
+    if '-USD' in symbol or '-BTC' in symbol:
+        return 'Crypto', symbol
+    
+    # Futures detection
+    if symbol.endswith('=F'):
+        return 'Futures', symbol
+    
+    # Forex detection
+    if symbol.endswith('=X') or len(symbol) == 6:
+        return 'Forex', symbol
+    
+    # Default to equities
+    return 'Equities', symbol
+
+def get_symbol_info(symbol: str):
+    """Get detailed symbol information with error handling."""
+    try:
+        asset_class, clean_symbol = parse_symbol(symbol)
+        ticker_obj = yf.Ticker(clean_symbol)
+        
+        # Validate symbol exists
+        info = ticker_obj.info
+        if not info or 'symbol' not in info:
+            return None, f"Invalid symbol: {symbol}"
+        
+        return {
+            'asset_class': asset_class,
+            'symbol': clean_symbol,
+            'name': info.get('longName', info.get('shortName', symbol)),
+            'currency': info.get('currency', 'USD'),
+            'exchange': info.get('exchange', 'Unknown'),
+            'market_state': info.get('marketState', 'Unknown')
+        }, None
+        
+    except Exception as e:
+        return None, f"Error fetching symbol data: {str(e)}"
+
 # --------------- Bloomberg-style Command Interface ---------------
 
-COMMAND_PLACEHOLDER = "e.g., AAPL FA  |  TSLA CH  |  MSFT IS"
+COMMAND_PLACEHOLDER = "e.g., AAPL FA | ES=F CH | EURUSD=X GO | BTC-USD OP | SC | PF"
 
 def parse_command(cmd: str):
     """Parse command string and return (ticker, view). If first token is a view code
@@ -43,8 +107,7 @@ def parse_command(cmd: str):
     parts = cmd.upper().strip().split()
     if not parts:
         return None, None
-    view_codes = {'CH', 'FA', 'GO', 'IS', 'BS', 'CF', 'SC', 'NW', 'PF'}
-    view_codes.add('OP')
+    view_codes = {'CH', 'FA', 'GO', 'IS', 'BS', 'CF', 'SC', 'NW', 'PF', 'OP', 'WL'}
     if parts[0] in view_codes and len(parts) == 1:
         return None, parts[0]
     ticker_part = parts[0]
@@ -130,11 +193,33 @@ if cmd_input != st.session_state['command']:
 ticker_override = st.session_state.get('cmd_ticker')
 if ticker_override:
     ticker = ticker_override
+else:
+    # Validate current ticker for selected asset class
+    symbol_info, error = get_symbol_info(ticker)
+    if error:
+        st.sidebar.error(f"⚠️ {error}")
+    elif symbol_info:
+        # Show asset class info
+        st.sidebar.success(f"✅ {symbol_info['asset_class']}: {symbol_info['name']}")
+        st.sidebar.caption(f"Exchange: {symbol_info['exchange']} | Currency: {symbol_info['currency']}")
 
 # --------------- End Command Interface ---------------
 
 # ---------------- Sidebar ----------------
 market = st.sidebar.selectbox("Market", ["India (NSE)", "USA (NASDAQ)"])
+
+# Asset class selector
+st.sidebar.markdown("---")
+st.sidebar.markdown("**📊 ASSET CLASSES**")
+asset_class = st.sidebar.selectbox(
+    "Asset Type",
+    options=list(ASSET_CLASSES.keys()),
+    index=0
+)
+
+# Show examples for selected asset class
+examples = ASSET_CLASSES[asset_class]['examples']
+st.sidebar.markdown(f"**Examples:** {', '.join(examples[:3])}")
 
 @st.cache_data
 def get_tickers(market):
@@ -169,21 +254,60 @@ if enable_realtime:
 # ---------------- Cached historical data ----------------
 @st.cache_data(ttl=3600)
 def get_history_data(ticker: str, period: str) -> pd.DataFrame:
-    """Return historical price data, cached on disk as parquet (fastparquet engine)."""
+    """Return historical price data with multi-asset support and reliability checks."""
     cache_dir = Path("data_cache")
     cache_dir.mkdir(exist_ok=True)
     file_path = cache_dir / f"{ticker}_{period}.parquet"
 
     if file_path.exists():
         try:
-            return pd.read_parquet(file_path)
+            df = pd.read_parquet(file_path)
+            # Validate cached data integrity
+            if not df.empty and len(df) > 5:  # Minimum data points
+                return df
+            else:
+                file_path.unlink(missing_ok=True)  # Remove invalid cache
         except Exception:
             file_path.unlink(missing_ok=True)  # remove corrupt cache and refetch
 
-    df = yf.download(ticker, period=period, progress=False)
-    if not df.empty:
-        df.to_parquet(file_path, engine="fastparquet")
-    return df
+    # Multi-asset data fetching with retries
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            df = yf.download(ticker, period=period, progress=False, timeout=30)
+            
+            # Data quality checks
+            if df.empty:
+                if attempt < max_retries - 1:
+                    continue
+                else:
+                    st.error(f"No data available for {ticker}")
+                    return pd.DataFrame()
+            
+            # Check for minimum data points
+            if len(df) < 5:
+                if attempt < max_retries - 1:
+                    continue
+                else:
+                    st.warning(f"Limited data available for {ticker}")
+            
+            # Cache successful fetch
+            if not df.empty:
+                try:
+                    df.to_parquet(file_path, engine="fastparquet")
+                except Exception as e:
+                    st.warning(f"Cache write failed: {e}")
+            
+            return df
+            
+        except Exception as e:
+            if attempt == max_retries - 1:
+                st.error(f"Data fetch failed for {ticker}: {str(e)}")
+                return pd.DataFrame()
+            else:
+                time.sleep(1)  # Brief delay before retry
+    
+    return pd.DataFrame()
 
 # ---------------- Fetch Data ----------------
 stock = yf.Ticker(ticker)
@@ -605,7 +729,7 @@ def compute_portfolio_metrics(prices: pd.DataFrame, positions: pd.Series):
         'VaR': var95,
     }
 
-# Screener view previously inserted, before st.stop() call. We inserted st.stop, which ends script; we need to ensure portfolio view earlier than stop. We'll adjust ordering: place Screener and News views earlier else they call st.stop. Let's integrate after those but before earlier stops. We added st.stop inside screener and news; so PF view must add elif before. We'll add before screener.
+# Screener view previously inserted, before st.stop() call. We inserted st.stop, which ends script; we need to ensure portfolio view earlier than stop. We'll adjust ordering: place Screener and News views earlier else they call st.stop. We added st.stop inside screener and news; so PF view must add elif before. We'll add before screener.
 
 # ---------------- Portfolio View ----------------
 av = st.session_state.get('active_view')
@@ -643,6 +767,83 @@ if av == 'PF':
             perf_df = result['cumulative'].to_frame('Portfolio')
             st.line_chart(perf_df)
 
+    st.stop()
+
+# ---------------- Multi-Asset Watchlist View ----------------
+if av == 'WL':
+    st.header("👁 Multi-Asset Watchlist")
+    
+    # Default watchlist with different asset classes
+    default_symbols = [
+        'AAPL', 'MSFT', 'GOOGL',  # Equities
+        'ES=F', 'NQ=F', 'YM=F',   # Futures
+        'EURUSD=X', 'GBPUSD=X',   # Forex
+        'BTC-USD', 'ETH-USD',     # Crypto
+        'GC=F', 'CL=F'            # Commodities
+    ]
+    
+    # Allow user to customize watchlist
+    symbols_input = st.text_area(
+        "Symbols (one per line):", 
+        value='\n'.join(default_symbols),
+        height=200
+    )
+    
+    symbols = [s.strip().upper() for s in symbols_input.split('\n') if s.strip()]
+    
+    if st.button("📊 Load Watchlist Data"):
+        watchlist_data = []
+        
+        progress_bar = st.progress(0)
+        for i, symbol in enumerate(symbols):
+            try:
+                # Get symbol info and current price
+                symbol_info, error = get_symbol_info(symbol)
+                if not error and symbol_info:
+                    current_prices = get_current_prices([symbol])
+                    price = current_prices.get(symbol, {}).get('regularMarketPrice', 'N/A')
+                    
+                    watchlist_data.append({
+                        'Symbol': symbol,
+                        'Name': symbol_info['name'][:30] + '...' if len(symbol_info['name']) > 30 else symbol_info['name'],
+                        'Asset Class': symbol_info['asset_class'],
+                        'Price': f"{price:.2f}" if isinstance(price, (int, float)) else str(price),
+                        'Currency': symbol_info['currency'],
+                        'Exchange': symbol_info['exchange'],
+                        'Market State': symbol_info['market_state']
+                    })
+                
+                progress_bar.progress((i + 1) / len(symbols))
+                
+            except Exception as e:
+                st.warning(f"Failed to load {symbol}: {str(e)}")
+        
+        if watchlist_data:
+            df = pd.DataFrame(watchlist_data)
+            
+            # Add color coding for market state
+            def color_market_state(val):
+                if val == 'REGULAR':
+                    return 'background-color: #004d00; color: white'
+                elif val == 'CLOSED':
+                    return 'background-color: #4d0000; color: white'
+                else:
+                    return 'background-color: #4d4d00; color: white'
+            
+            styled_df = df.style.applymap(color_market_state, subset=['Market State'])
+            st.dataframe(styled_df, use_container_width=True, height=600)
+            
+            # Export functionality
+            csv = df.to_csv(index=False)
+            st.download_button(
+                "📥 Download Watchlist CSV",
+                csv,
+                "watchlist.csv",
+                "text/csv"
+            )
+        else:
+            st.error("No valid symbols found in watchlist")
+    
     st.stop()
 
 # ---------------- Screener View ----------------
