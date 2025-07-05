@@ -2,6 +2,10 @@ import streamlit as st
 import yfinance as yf
 # Replaced Plotly with TradingView Lightweight Charts
 import json
+try:
+    import talib
+except ImportError:
+    talib = None  # TALib might not be installed in dev env
 import streamlit.components.v1 as components
 import pandas as pd
 from statsmodels.tsa.arima.model import ARIMA
@@ -45,6 +49,10 @@ show_ma = st.sidebar.checkbox("Show 20-Day MA", True)
 use_forecast = st.sidebar.checkbox("🔮 Predict Future with ARIMA")
 forecast_days = st.sidebar.slider("Days to Forecast", 1, 30, 7) if use_forecast else 0
 
+# Technical indicators selection
+available_indicators = ["RSI", "MACD", "Bollinger Bands"]
+indicators_selected = st.sidebar.multiselect("Technical Indicators", available_indicators)
+
 # Real-time WebSocket options
 enable_realtime = st.sidebar.checkbox("🔌 Real-Time Updates (Finnhub WS)")
 finnhub_token = ""
@@ -78,6 +86,34 @@ data = get_history_data(ticker, period)
 data = data.asfreq('B')
 data["Close"].interpolate(method='linear', inplace=True)
 data["MA20"] = data["Close"].rolling(20).mean()
+
+# ---------------- TA-Lib Indicators ----------------
+indicator_payloads = []
+
+if talib:
+    close_np = data["Close"].values
+    idx_ts = data.index
+
+    if "RSI" in indicators_selected:
+        rsi = talib.RSI(close_np, timeperiod=14)
+        rsi_data = [{"time": int(ts.timestamp()), "value": float(val)} for ts, val in zip(idx_ts, rsi) if not pd.isna(val)]
+        indicator_payloads.append({"name": "RSI", "type": "line", "color": "purple", "data": rsi_data})
+
+    if "MACD" in indicators_selected:
+        macd, macd_signal, macd_hist = talib.MACD(close_np, fastperiod=12, slowperiod=26, signalperiod=9)
+        macd_data = [{"time": int(ts.timestamp()), "value": float(val)} for ts, val in zip(idx_ts, macd) if not pd.isna(val)]
+        indicator_payloads.append({"name": "MACD", "type": "line", "color": "teal", "data": macd_data})
+
+    if "Bollinger Bands" in indicators_selected:
+        upper, middle, lower = talib.BBANDS(close_np, timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
+        upper_data = [{"time": int(ts.timestamp()), "value": float(val)} for ts, val in zip(idx_ts, upper) if not pd.isna(val)]
+        lower_data = [{"time": int(ts.timestamp()), "value": float(val)} for ts, val in zip(idx_ts, lower) if not pd.isna(val)]
+        indicator_payloads.append({"name": "Upper Band", "type": "line", "color": "#FFB6C1", "data": upper_data})
+        indicator_payloads.append({"name": "Lower Band", "type": "line", "color": "#87CEFA", "data": lower_data})
+
+# else no talib -> warn user
+elif indicators_selected:
+    st.warning("TA-Lib not available. Install dependencies to enable indicators.")
 
 # ---------------- Async price fetch helpers ----------------
 async def _fetch_quote(session, ticker: str):
@@ -181,6 +217,7 @@ with left:
             "enable_realtime": enable_realtime,
             "ws_token": finnhub_token,
             "ticker": ticker.split(".")[0],
+            "indicators": indicator_payloads,
         }
     )
 
@@ -214,6 +251,14 @@ with left:
             mainSeries = chart.addLineSeries();
     }}
     mainSeries.setData(payload.chart_data);
+
+    // Add technical indicators as separate line series
+    if (payload.indicators) {
+        payload.indicators.forEach(ind => {
+            const series = chart.addLineSeries({ color: ind.color || 'grey', lineWidth: 1 });
+            series.setData(ind.data);
+        });
+    }
 
     if (enableRealtime) {{
         const ws = new WebSocket(`wss://ws.finnhub.io?token=${payload.ws_token}`);

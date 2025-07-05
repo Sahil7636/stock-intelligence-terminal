@@ -4,7 +4,7 @@
 FROM python:3.10-slim AS builder
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl libta-lib0 libta-lib0-dev && rm -rf /var/lib/apt/lists/*
 
 # Configure Poetry
 ENV POETRY_HOME=/opt/poetry \
