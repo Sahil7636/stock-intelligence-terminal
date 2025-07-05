@@ -4,16 +4,13 @@ import plotly.graph_objects as go
 import pandas as pd
 from statsmodels.tsa.arima.model import ARIMA
 from datetime import timedelta
-import numpy as np
 import warnings
 warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="📈 Stock Intelligence Terminal", layout="wide")
 
-st.markdown("""
-# 📊 Stock Intelligence Terminal
-**Built for Quantitative Analysts** | Real-time Insights | Forecasting with ARIMA
-""")
+st.markdown("# 📊 Stock Intelligence Terminal")
+st.caption("Built for Quantitative Analysts | Real-time Market Data | ARIMA Forecasting")
 
 # ---------------- Sidebar ----------------
 market = st.sidebar.selectbox("Market", ["India (NSE)", "USA (NASDAQ)"])
@@ -21,13 +18,11 @@ market = st.sidebar.selectbox("Market", ["India (NSE)", "USA (NASDAQ)"])
 @st.cache_data
 def get_tickers_auto(market):
     if market == "India (NSE)":
-        url = "https://www1.nseindia.com/content/equities/EQUITY_L.csv"
-        try:
-            df = pd.read_csv(url)
-            df.columns = df.columns.str.strip()
-            return sorted(df['SYMBOL'].dropna().astype(str).apply(lambda x: x + ".NS"))
-        except:
-            return ["RELIANCE.NS", "TCS.NS", "INFY.NS"]
+        # NSE blocks web scraping, use hardcoded top Nifty stocks
+        return sorted([
+            "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS", "ICICIBANK.NS",
+            "ITC.NS", "LT.NS", "SBIN.NS", "AXISBANK.NS", "BHARTIARTL.NS"
+        ])
     else:
         url = "https://raw.githubusercontent.com/datasets/nasdaq-listings/master/data/nasdaq-listed-symbols.csv"
         df = pd.read_csv(url)
@@ -42,24 +37,21 @@ use_forecast = st.sidebar.checkbox("🔮 Predict Future with ARIMA")
 forecast_days = st.sidebar.slider("Days to Forecast", 1, 30, 7) if use_forecast else 0
 
 # ---------------- Fetch Data ----------------
-stock = yf.Ticker(ticker)
-info = stock.info
-
-# Fetch daily and 1-minute intraday data
 try:
+    stock = yf.Ticker(ticker)
+    info = stock.info
     data = stock.history(period=period)
     intraday = yf.download(ticker, period="1d", interval="1m")
     latest_price = intraday["Close"].iloc[-1]
     st.sidebar.metric("📍 Live Price (1m)", f"{latest_price:.2f}")
-except:
-    data = pd.DataFrame()
-    intraday = pd.DataFrame()
-    st.sidebar.warning("⚠️ Failed to fetch price data.")
+except Exception:
+    st.sidebar.error("❌ Error fetching data")
+    st.stop()
 
-if not data.empty:
-    data = data.asfreq('B')
-    data["Close"].interpolate(method='linear', inplace=True)
-    data["MA20"] = data["Close"].rolling(20).mean()
+# Clean data
+data = data.asfreq('B')
+data["Close"].interpolate(method='linear', inplace=True)
+data["MA20"] = data["Close"].rolling(20).mean()
 
 # ---------------- Forecast ----------------
 def forecast_arima(series, days=7):
@@ -71,119 +63,77 @@ def forecast_arima(series, days=7):
     return pd.Series(forecast.values, index=future_dates)
 
 forecast_series = None
-if use_forecast and not data.empty:
+if use_forecast:
     try:
         forecast_series = forecast_arima(data["Close"], forecast_days)
     except Exception as e:
-        st.error(f"Forecasting failed: {e}")
+        st.warning(f"Forecasting failed: {e}")
 
-# ---------------- Formatters ----------------
-def format_value(val):
-    if isinstance(val, (int, float)):
-        symbol = "₹" if ticker.endswith(".NS") else "$"
-        return f"{symbol}{val:,.0f}" if abs(val) > 1 else f"{symbol}{val:.2f}"
-    return "--"
+# ---------------- Layout Tabs ----------------
+tab1, tab2, tab3 = st.tabs(["📈 Chart", "📊 Intraday", "📋 Financials"])
 
-def format_ratio(val):
-    return f"{val:.2f}" if isinstance(val, (int, float)) else "--"
+# Tab 1: Price Chart
+with tab1:
+    fig = go.Figure()
+    if chart_type == "Candlestick":
+        fig.add_trace(go.Candlestick(
+            x=data.index, open=data['Open'], high=data['High'],
+            low=data['Low'], close=data['Close'], name='Candlestick'))
+    elif chart_type == "Line":
+        fig.add_trace(go.Scatter(x=data.index, y=data["Close"], mode="lines", name="Close"))
+    elif chart_type == "Bar":
+        fig.add_trace(go.Bar(x=data.index, y=data["Close"], name="Bar"))
 
-def format_percent(val):
-    return f"{val:.2%}" if isinstance(val, (int, float)) else "--"
+    if show_ma:
+        fig.add_trace(go.Scatter(
+            x=data.index, y=data["MA20"], mode="lines", name="MA20",
+            line=dict(color='orange', dash='dash')))
 
-def safe_div(a, b):
-    return a / b if b else None
+    if forecast_series is not None:
+        fig.add_trace(go.Scatter(
+            x=forecast_series.index, y=forecast_series.values,
+            mode="lines", name="ARIMA Forecast",
+            line=dict(color='green', dash='dot')))
 
-# ---------------- Layout ----------------
-if not data.empty:
-    left, right = st.columns((2, 1))
+    fig.update_layout(
+        hovermode="x unified",
+        xaxis_rangeslider_visible=True,
+        height=500,
+        plot_bgcolor="#f4f4f4",
+        paper_bgcolor="#f4f4f4"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.dataframe(data.tail(10))
 
-    with left:
-        st.subheader("📈 Price Chart")
+# Tab 2: Intraday Movement
+with tab2:
+    st.subheader("📅 Today's Intraday Price")
+    st.line_chart(intraday["Close"])
+    st.dataframe(intraday.tail())
 
-        fig = go.Figure()
-        if chart_type == "Candlestick":
-            fig.add_trace(go.Candlestick(
-                x=data.index, open=data['Open'], high=data['High'],
-                low=data['Low'], close=data['Close'], name='Candlestick'))
-        elif chart_type == "Line":
-            fig.add_trace(go.Scatter(x=data.index, y=data["Close"], mode="lines", name="Close"))
-        elif chart_type == "Bar":
-            fig.add_trace(go.Bar(x=data.index, y=data["Close"], name="Bar"))
+# Tab 3: Financials
+with tab3:
+    def format_value(val):
+        if isinstance(val, (int, float)):
+            symbol = "₹" if ticker.endswith(".NS") else "$"
+            return f"{symbol}{val:,.0f}" if abs(val) > 1 else f"{symbol}{val:.2f}"
+        return "--"
 
-        if show_ma:
-            fig.add_trace(go.Scatter(
-                x=data.index, y=data["MA20"], mode="lines", name="MA20",
-                line=dict(color='orange', dash='dash')))
+    def format_percent(val):
+        return f"{val:.2%}" if isinstance(val, (int, float)) else "--"
 
-        if forecast_series is not None:
-            fig.add_trace(go.Scatter(
-                x=forecast_series.index, y=forecast_series.values,
-                mode="lines", name="ARIMA Forecast",
-                line=dict(color='green', dash='dot')))
+    def safe_div(a, b):
+        return a / b if b else None
 
-        fig.update_layout(
-            hovermode="x unified",
-            xaxis_rangeslider_visible=True,
-            height=500,
-            margin=dict(l=10, r=10, t=30, b=10),
-            plot_bgcolor="#f4f4f4",
-            paper_bgcolor="#f4f4f4",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    col1, col2 = st.columns(2)
+    col1.metric("Market Cap", format_value(info.get("marketCap")))
+    col2.metric("PE Ratio", info.get("trailingPE"))
+    col1.metric("PB Ratio", info.get("priceToBook"))
+    col2.metric("EPS (TTM)", info.get("trailingEps"))
+    col1.metric("ROE", format_percent(info.get("returnOnEquity")))
+    col2.metric("ROA", format_percent(info.get("returnOnAssets")))
+    col1.metric("Dividend Yield", format_percent(info.get("dividendYield")))
 
-        st.markdown("#### 🔍 Data Preview")
-        st.dataframe(data.tail(10), use_container_width=True, height=200)
-
-        st.download_button(
-            "📥 Download CSV",
-            data.to_csv().encode('utf-8'),
-            file_name=f"{ticker}_data.csv",
-            mime='text/csv'
-        )
-
-    with right:
-        st.subheader("📋 Key Financial Metrics")
-        col1, col2 = st.columns(2)
-        col1.metric("Market Cap", format_value(info.get("marketCap")))
-        col2.metric("PE Ratio", format_ratio(info.get("trailingPE")))
-        col1.metric("PB Ratio", format_ratio(info.get("priceToBook")))
-        col2.metric("EPS (TTM)", format_ratio(info.get("trailingEps")))
-        col1.metric("ROE", format_percent(info.get("returnOnEquity")))
-        col2.metric("ROA", format_percent(info.get("returnOnAssets")))
-        col1.metric("Dividend Yield", format_percent(info.get("dividendYield")))
-
-        st.markdown("---")
-        st.markdown("**📖 Company Overview**")
-        st.info(info.get("longBusinessSummary", "No summary available."))
-
-        if info.get("website"):
-            st.markdown(f"🌐 [Visit Website]({info.get('website')})", unsafe_allow_html=True)
-
-        st.markdown("### 📌 M&A / Valuation Metrics")
-        try:
-            bs = stock.balance_sheet
-            cf = stock.cashflow
-            income = stock.financials
-
-            total_debt = bs.loc["Total Liab"].iloc[0]
-            total_equity = bs.loc["Total Stockholder Equity"].iloc[0]
-            current_assets = bs.loc["Total Current Assets"].iloc[0]
-            current_liabilities = bs.loc["Total Current Liabilities"].iloc[0]
-            total_revenue = income.loc["Total Revenue"].iloc[0]
-            net_income = income.loc["Net Income"].iloc[0]
-            free_cash_flow = cf.loc["Total Cash From Operating Activities"].iloc[0] - cf.loc["Capital Expenditures"].iloc[0]
-
-            ev_ebitda = info.get("enterpriseToEbitda")
-            ev_rev = info.get("enterpriseToRevenue")
-
-            col3, col4 = st.columns(2)
-            col3.metric("EV / EBITDA", format_ratio(ev_ebitda))
-            col4.metric("EV / Revenue", format_ratio(ev_rev))
-            col3.metric("Debt / Equity", format_ratio(safe_div(total_debt, total_equity)))
-            col4.metric("Current Ratio", format_ratio(safe_div(current_assets, current_liabilities)))
-            col3.metric("Net Profit Margin", format_percent(safe_div(net_income, total_revenue)))
-            col4.metric("Free Cash Flow", format_value(free_cash_flow))
-
-        except Exception:
-            st.warning("⚠️ Advanced financial metrics not available for this stock.")
+    st.markdown("---")
+    st.markdown("**📖 Company Overview**")
+    st.info(info.get("longBusinessSummary", "No summary available."))
