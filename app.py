@@ -2,59 +2,73 @@ import streamlit as st
 import yfinance as yf
 import plotly.graph_objects as go
 import pandas as pd
+from statsmodels.tsa.arima.model import ARIMA
 from datetime import timedelta
-import requests
-import warnings
-warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="📈 Stock Intelligence Terminal", layout="wide")
 
-st.markdown("""
-# 📊 Stock Intelligence Terminal
-**Quant-Grade Dashboard** | Real-time Price | Financial Metrics
-""")
+# Optional styling
+try:
+    with open("style.css") as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+except FileNotFoundError:
+    pass
+
+st.title("📊 Stock Intelligence Terminal")
 
 # ---------------- Sidebar ----------------
 market = st.sidebar.selectbox("Market", ["India (NSE)", "USA (NASDAQ)"])
 
 @st.cache_data
-def get_tickers_auto(market):
+def get_tickers(market):
     if market == "India (NSE)":
-        url = "https://www1.nseindia.com/content/equities/EQUITY_L.csv"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        try:
-            response = requests.get(url, headers=headers)
-            df = pd.read_csv(pd.compat.StringIO(response.text))
-            df.columns = df.columns.str.strip()
-            return sorted(df['SYMBOL'].dropna().astype(str).apply(lambda x: x + ".NS"))
-        except:
-            return ["RELIANCE.NS", "TCS.NS", "INFY.NS"]
+        return sorted([
+            "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS",
+            "ICICIBANK.NS", "ITC.NS", "LT.NS", "SBIN.NS", "AXISBANK.NS", "BHARTIARTL.NS"
+        ])
     else:
         url = "https://raw.githubusercontent.com/datasets/nasdaq-listings/master/data/nasdaq-listed-symbols.csv"
         df = pd.read_csv(url)
         return df['Symbol'].dropna().sort_values().tolist()
 
-stock_list = get_tickers_auto(market)
+stock_list = get_tickers(market)
 ticker = st.sidebar.selectbox("Select Stock", stock_list)
 period = st.sidebar.selectbox("Time Frame", ["1mo", "3mo", "6mo", "1y", "2y", "5y"], index=2)
 chart_type = st.sidebar.selectbox("Chart Type", ["Candlestick", "Line", "Bar"])
 show_ma = st.sidebar.checkbox("Show 20-Day MA", True)
+use_forecast = st.sidebar.checkbox("🔮 Predict Future with ARIMA")
+forecast_days = st.sidebar.slider("Days to Forecast", 1, 30, 7) if use_forecast else 0
 
 # ---------------- Fetch Data ----------------
-try:
-    stock = yf.Ticker(ticker)
-    info = stock.info
-    data = stock.history(period=period)
-    intraday = yf.download(ticker, period="1d", interval="1m")
-    latest_price = intraday["Close"].iloc[-1]
-    st.sidebar.metric("📍 Live Price (1m)", f"{latest_price:.2f}")
-except Exception as e:
-    st.error("Failed to load data.")
-    st.stop()
-
+stock = yf.Ticker(ticker)
+info = stock.info
+data = stock.history(period=period)
 data = data.asfreq('B')
 data["Close"].interpolate(method='linear', inplace=True)
 data["MA20"] = data["Close"].rolling(20).mean()
+
+# Current price
+try:
+    current_price = yf.Ticker(ticker).history(period="1d")["Close"].iloc[-1]
+    st.sidebar.metric("📍 Current Price", f"{current_price:.2f}")
+except Exception:
+    st.sidebar.warning("⚠️ Current price unavailable.")
+
+# ---------------- Forecast ----------------
+def forecast_arima(series, days=7):
+    model = ARIMA(series, order=(5, 1, 0))
+    model_fit = model.fit()
+    forecast = model_fit.forecast(steps=days)
+    last_date = series.index[-1]
+    future_dates = [last_date + timedelta(days=i + 1) for i in range(days)]
+    return pd.Series(forecast.values, index=future_dates)
+
+forecast_series = None
+if use_forecast:
+    try:
+        forecast_series = forecast_arima(data["Close"], forecast_days)
+    except Exception as e:
+        st.error(f"Forecasting failed: {e}")
 
 # ---------------- Formatters ----------------
 def format_value(val):
@@ -92,6 +106,12 @@ with left:
         fig.add_trace(go.Scatter(
             x=data.index, y=data["MA20"], mode="lines", name="MA20",
             line=dict(color='orange', dash='dash')))
+
+    if forecast_series is not None:
+        fig.add_trace(go.Scatter(
+            x=forecast_series.index, y=forecast_series.values,
+            mode="lines", name="ARIMA Forecast",
+            line=dict(color='green', dash='dot')))
 
     fig.update_layout(
         hovermode="x unified",
