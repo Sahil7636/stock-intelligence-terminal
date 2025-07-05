@@ -26,6 +26,47 @@ except FileNotFoundError:
 
 st.title("📊 Stock Intelligence Terminal")
 
+# --------------- Bloomberg-style Command Interface ---------------
+
+COMMAND_PLACEHOLDER = "e.g., AAPL FA  |  TSLA CH  |  MSFT IS"
+
+def parse_command(cmd: str):
+    """Parse command string like 'AAPL FA' and return ticker, view code."""
+    if not cmd:
+        return None, None
+    parts = cmd.upper().strip().split()
+    if not parts:
+        return None, None
+    ticker_part = parts[0]
+    view = parts[1] if len(parts) > 1 else None
+    return ticker_part, view
+
+# Maintain command in session state to persist across reruns
+if 'command' not in st.session_state:
+    st.session_state['command'] = ''
+if 'cmd_ticker' not in st.session_state:
+    st.session_state['cmd_ticker'] = None
+if 'active_view' not in st.session_state:
+    st.session_state['active_view'] = None
+
+cmd_input = st.text_input("💬 Command", value=st.session_state['command'], placeholder=COMMAND_PLACEHOLDER)
+
+# If command changed, update session state
+if cmd_input != st.session_state['command']:
+    st.session_state['command'] = cmd_input
+    tkr, view_code = parse_command(cmd_input)
+    if tkr:
+        st.session_state['cmd_ticker'] = tkr
+    if view_code:
+        st.session_state['active_view'] = view_code
+
+# Override ticker with command ticker if provided (after sidebar creation to take precedence)
+ticker_override = st.session_state.get('cmd_ticker')
+if ticker_override:
+    ticker = ticker_override
+
+# --------------- End Command Interface ---------------
+
 # ---------------- Sidebar ----------------
 market = st.sidebar.selectbox("Market", ["India (NSE)", "USA (NASDAQ)"])
 
@@ -179,7 +220,9 @@ def safe_div(a, b):
 left, right = st.columns((2, 1))
 
 with left:
-    st.subheader("📈 Price Chart")
+    show_chart = st.session_state.get('active_view') in (None, 'CH', 'GO', '')
+    if show_chart:
+        st.subheader("📈 Price Chart")
 
     # -------- TradingView Lightweight Charts integration --------
     # Build data payloads depending on selected chart type
@@ -381,47 +424,71 @@ with left:
     )
 
 with right:
-    st.subheader("📋 Key Financial Metrics")
-    col1, col2 = st.columns(2)
-    col1.metric("Market Cap", format_value(info.get("marketCap")))
-    col2.metric("PE Ratio", format_ratio(info.get("trailingPE")))
-    col1.metric("PB Ratio", format_ratio(info.get("priceToBook")))
-    col2.metric("EPS (TTM)", format_ratio(info.get("trailingEps")))
-    col1.metric("ROE", format_percent(info.get("returnOnEquity")))
-    col2.metric("ROA", format_percent(info.get("returnOnAssets")))
-    col1.metric("Dividend Yield", format_percent(info.get("dividendYield")))
+    av = st.session_state.get('active_view')
 
-    st.markdown("---")
-    st.markdown("**📖 Company Overview**")
-    st.info(info.get("longBusinessSummary", "No summary available."))
+    if av in (None, '', 'GO', 'CH', 'FA'):
+        st.subheader("📋 Key Financial Metrics")
+        col1, col2 = st.columns(2)
+        col1.metric("Market Cap", format_value(info.get("marketCap")))
+        col2.metric("PE Ratio", format_ratio(info.get("trailingPE")))
+        col1.metric("PB Ratio", format_ratio(info.get("priceToBook")))
+        col2.metric("EPS (TTM)", format_ratio(info.get("trailingEps")))
+        col1.metric("ROE", format_percent(info.get("returnOnEquity")))
+        col2.metric("ROA", format_percent(info.get("returnOnAssets")))
+        col1.metric("Dividend Yield", format_percent(info.get("dividendYield")))
 
-    if info.get("website"):
-        st.markdown(f"🌐 [Visit Website]({info.get('website')})", unsafe_allow_html=True)
+        st.markdown("---")
+        st.markdown("**📖 Company Overview**")
+        st.info(info.get("longBusinessSummary", "No summary available."))
 
-    st.markdown("### 📌 M&A / Valuation Metrics")
-    try:
-        bs = stock.balance_sheet
-        cf = stock.cashflow
-        income = stock.financials
+        if info.get("website"):
+            st.markdown(f"🌐 [Visit Website]({info.get('website')})", unsafe_allow_html=True)
 
-        total_debt = bs.loc["Total Liab"].iloc[0]
-        total_equity = bs.loc["Total Stockholder Equity"].iloc[0]
-        current_assets = bs.loc["Total Current Assets"].iloc[0]
-        current_liabilities = bs.loc["Total Current Liabilities"].iloc[0]
-        total_revenue = income.loc["Total Revenue"].iloc[0]
-        net_income = income.loc["Net Income"].iloc[0]
-        free_cash_flow = cf.loc["Total Cash From Operating Activities"].iloc[0] - cf.loc["Capital Expenditures"].iloc[0]
+        st.markdown("### 📌 M&A / Valuation Metrics")
+        try:
+            bs = stock.balance_sheet
+            cf = stock.cashflow
+            income = stock.financials
 
-        ev_ebitda = info.get("enterpriseToEbitda")
-        ev_rev = info.get("enterpriseToRevenue")
+            total_debt = bs.loc["Total Liab"].iloc[0]
+            total_equity = bs.loc["Total Stockholder Equity"].iloc[0]
+            current_assets = bs.loc["Total Current Assets"].iloc[0]
+            current_liabilities = bs.loc["Total Current Liabilities"].iloc[0]
+            total_revenue = income.loc["Total Revenue"].iloc[0]
+            net_income = income.loc["Net Income"].iloc[0]
+            free_cash_flow = cf.loc["Total Cash From Operating Activities"].iloc[0] - cf.loc["Capital Expenditures"].iloc[0]
 
-        col3, col4 = st.columns(2)
-        col3.metric("EV / EBITDA", format_ratio(ev_ebitda))
-        col4.metric("EV / Revenue", format_ratio(ev_rev))
-        col3.metric("Debt / Equity", format_ratio(safe_div(total_debt, total_equity)))
-        col4.metric("Current Ratio", format_ratio(safe_div(current_assets, current_liabilities)))
-        col3.metric("Net Profit Margin", format_percent(safe_div(net_income, total_revenue)))
-        col4.metric("Free Cash Flow", format_value(free_cash_flow))
+            ev_ebitda = info.get("enterpriseToEbitda")
+            ev_rev = info.get("enterpriseToRevenue")
 
-    except Exception:
-        st.warning("⚠️ Advanced financial metrics not available for this stock.")
+            col3, col4 = st.columns(2)
+            col3.metric("EV / EBITDA", format_ratio(ev_ebitda))
+            col4.metric("EV / Revenue", format_ratio(ev_rev))
+            col3.metric("Debt / Equity", format_ratio(safe_div(total_debt, total_equity)))
+            col4.metric("Current Ratio", format_ratio(safe_div(current_assets, current_liabilities)))
+            col3.metric("Net Profit Margin", format_percent(safe_div(net_income, total_revenue)))
+            col4.metric("Free Cash Flow", format_value(free_cash_flow))
+
+        except Exception:
+            st.warning("⚠️ Advanced financial metrics not available for this stock.")
+
+    elif av == 'IS':
+        st.subheader("📄 Income Statement")
+        try:
+            st.dataframe(stock.financials.T, use_container_width=True)
+        except Exception:
+            st.error("Income statement not available.")
+
+    elif av == 'BS':
+        st.subheader("📄 Balance Sheet")
+        try:
+            st.dataframe(stock.balance_sheet.T, use_container_width=True)
+        except Exception:
+            st.error("Balance sheet not available.")
+
+    elif av == 'CF':
+        st.subheader("📄 Cash Flow Statement")
+        try:
+            st.dataframe(stock.cashflow.T, use_container_width=True)
+        except Exception:
+            st.error("Cash flow statement not available.")
