@@ -44,6 +44,7 @@ def parse_command(cmd: str):
     if not parts:
         return None, None
     view_codes = {'CH', 'FA', 'GO', 'IS', 'BS', 'CF', 'SC', 'NW', 'PF'}
+    view_codes.add('OP')
     if parts[0] in view_codes and len(parts) == 1:
         return None, parts[0]
     ticker_part = parts[0]
@@ -678,4 +679,52 @@ if av == 'NW':
             st.markdown(f"**{item.get('headline')}**  ")
             st.markdown(f"*{dt_ts}* - [{item.get('source')}]({item.get('url')})  ")
             st.markdown("---")
+    st.stop()
+
+# ---------------- Options Chain View ----------------
+if av == 'OP':
+    st.header(f"📈 Options Chain - {ticker}")
+
+    st.info("Data via Yahoo Finance — delayed, for demo purposes only")
+
+    opt_ticker = yf.Ticker(ticker)
+    expiries = opt_ticker.options
+    if not expiries:
+        st.error("No options data available for this ticker.")
+        st.stop()
+
+    expiry = st.selectbox('Expiry Date', options=expiries)
+
+    @st.cache_data(ttl=300)
+    def get_chain(ticker_symbol, exp):
+        try:
+            t = yf.Ticker(ticker_symbol)
+            chain = t.option_chain(exp)
+            df_calls = chain.calls.assign(type='Call')
+            df_puts = chain.puts.assign(type='Put')
+            df = pd.concat([df_calls, df_puts])
+            df['expiry'] = exp
+            return df
+        except Exception:
+            return pd.DataFrame()
+
+    chain_df = get_chain(ticker, expiry)
+
+    if chain_df.empty:
+        st.error("Failed to retrieve option chain.")
+        st.stop()
+
+    option_type = st.radio('Show', options=['Calls', 'Puts'])
+    chain_filtered = chain_df[chain_df['type'] == ('Call' if option_type == 'Calls' else 'Put')]
+
+    # Filter by strike range
+    strike_min = chain_filtered['strike'].min()
+    strike_max = chain_filtered['strike'].max()
+    strike_range = st.slider('Strike Range', float(strike_min), float(strike_max), (float(strike_min), float(strike_max)))
+    chain_filtered = chain_filtered[(chain_filtered['strike'] >= strike_range[0]) & (chain_filtered['strike'] <= strike_range[1])]
+
+    # Show selected columns
+    display_cols = ['contractSymbol', 'strike', 'lastPrice', 'bid', 'ask', 'impliedVolatility', 'openInterest', 'inTheMoney']
+    st.dataframe(chain_filtered[display_cols].sort_values('strike'), use_container_width=True, height=400)
+
     st.stop()
