@@ -22,6 +22,41 @@ from pathlib import Path
 import time # Added for retry logic
 from difflib import SequenceMatcher
 
+# Add feature verification function
+def verify_platform_features():
+    """Verify all platform features are working correctly."""
+    issues = []
+    
+    # Test 1: Data fetching
+    try:
+        test_data = yf.download("AAPL", period="5d", progress=False)
+        if test_data.empty:
+            issues.append("Data fetching: No data returned")
+    except Exception as e:
+        issues.append(f"Data fetching: {str(e)}")
+    
+    # Test 2: TA-Lib
+    if not talib:
+        issues.append("TA-Lib: Not available")
+    
+    # Test 3: Command parsing
+    try:
+        ticker, view = parse_command("AAPL FA")
+        if ticker != "AAPL" or view != "FA":
+            issues.append("Command parsing: Incorrect parsing")
+    except Exception as e:
+        issues.append(f"Command parsing: {str(e)}")
+    
+    # Test 4: Fuzzy search
+    try:
+        suggestions = fuzzy_search("APL", COMMAND_SUGGESTIONS)
+        if not suggestions:
+            issues.append("Fuzzy search: No suggestions returned")
+    except Exception as e:
+        issues.append(f"Fuzzy search: {str(e)}")
+    
+    return issues
+
 st.set_page_config(page_title="📈 Stock Intelligence Terminal", layout="wide")
 
 # Optional styling
@@ -32,6 +67,72 @@ except FileNotFoundError:
     pass
 
 st.title("📊 Stock Intelligence Terminal")
+
+# Add status indicators
+st.sidebar.markdown("---")
+st.sidebar.markdown("**🔧 SYSTEM STATUS**")
+
+# Check system components
+status_col1, status_col2 = st.sidebar.columns(2)
+
+# Check TA-Lib
+if talib:
+    status_col1.success("TA-Lib ✅")
+else:
+    status_col1.error("TA-Lib ❌")
+
+# Check data connection
+try:
+    test_data = yf.download("AAPL", period="5d", progress=False)
+    if not test_data.empty:
+        status_col2.success("Data ✅")
+    else:
+        status_col2.warning("Data ⚠️")
+except:
+    status_col2.error("Data ❌")
+
+# Show current ticker info
+if st.session_state.get('cmd_ticker'):
+    st.sidebar.info(f"📍 Active: {st.session_state['cmd_ticker']}")
+    if st.session_state.get('active_view'):
+        st.sidebar.info(f"🔍 View: {st.session_state['active_view']}")
+
+# Add help section
+with st.sidebar.expander("📚 Quick Help", expanded=False):
+    st.markdown("""
+    **Command Examples:**
+    - `AAPL FA` - Apple fundamentals
+    - `ES=F CH` - S&P 500 futures chart
+    - `BTC-USD OP` - Bitcoin options
+    - `SC` - Stock screener
+    - `PF` - Portfolio analytics
+    - `WL` - Multi-asset watchlist
+    
+    **Asset Classes:**
+    - Stocks: AAPL, MSFT, GOOGL
+    - Futures: ES=F, NQ=F, GC=F
+    - Forex: EURUSD=X, GBPUSD=X
+    - Crypto: BTC-USD, ETH-USD
+    
+    **Features:**
+    - Real-time price updates
+    - Technical indicators
+    - Drawing tools
+    - Portfolio analytics
+    - Multi-asset support
+    """)
+
+# Add diagnostic section
+with st.sidebar.expander("🔧 Diagnostics", expanded=False):
+    if st.button("🧪 Run System Test"):
+        with st.spinner("Testing platform features..."):
+            issues = verify_platform_features()
+            if not issues:
+                st.success("✅ All features working correctly!")
+            else:
+                st.error("❌ Issues found:")
+                for issue in issues:
+                    st.write(f"- {issue}")
 
 # --------------- Compliance & Regulatory Notice ---------------
 st.sidebar.markdown("---")
@@ -260,12 +361,23 @@ if cmd_input and len(cmd_input) >= 2:
     suggestions = fuzzy_search(cmd_input, COMMAND_SUGGESTIONS)
     if suggestions:
         st.markdown("**💡 Suggestions:**")
-        suggestion_cols = st.columns(min(3, len(suggestions)))
-        for i, (symbol, description, score) in enumerate(suggestions[:3]):
-            with suggestion_cols[i]:
-                if st.button(f"**{symbol}**\n{description[:30]}{'...' if len(description) > 30 else ''}", key=f"suggest_{i}"):
-                    st.session_state['command'] = symbol
-                    st.rerun()
+        
+        # Create a more compact suggestion display
+        suggestion_container = st.container()
+        with suggestion_container:
+            cols = st.columns(min(5, len(suggestions)))
+            for i, (symbol, description, score) in enumerate(suggestions[:5]):
+                with cols[i]:
+                    # Create more compact buttons
+                    button_text = f"{symbol}"
+                    if st.button(button_text, key=f"suggest_{i}", help=description):
+                        st.session_state['command'] = symbol
+                        st.rerun()
+        
+        # Show detailed suggestions in a more readable format
+        with st.expander("📋 All Suggestions", expanded=False):
+            for symbol, description, score in suggestions:
+                st.markdown(f"**{symbol}** - {description} _(Score: {score:.2f})_")
 
 # If command changed, update session state
 if cmd_input != st.session_state['command']:
@@ -398,40 +510,75 @@ def get_history_data(ticker: str, period: str) -> pd.DataFrame:
 
 # ---------------- Fetch Data ----------------
 stock = yf.Ticker(ticker)
-info = stock.info
+
+# Safely get stock info with error handling
+try:
+    info = stock.info
+    if not info or 'symbol' not in info:
+        info = {'symbol': ticker, 'shortName': ticker, 'longName': ticker}
+except Exception as e:
+    st.warning(f"Could not fetch company info for {ticker}: {str(e)}")
+    info = {'symbol': ticker, 'shortName': ticker, 'longName': ticker}
+
 # Replace direct yfinance history call with cached version
 data = get_history_data(ticker, period)
-data = data.asfreq('B')
-data["Close"].interpolate(method='linear', inplace=True)
-data["MA20"] = data["Close"].rolling(20).mean()
+
+# Process data only if not empty
+if not data.empty:
+    # Fill business days and interpolate missing values
+    try:
+        data = data.asfreq('B')
+        if "Close" in data.columns:
+            data["Close"].interpolate(method='linear', inplace=True)
+            data["MA20"] = data["Close"].rolling(20).mean()
+    except Exception as e:
+        st.warning(f"Data processing warning: {str(e)}")
+else:
+    st.error(f"No historical data available for {ticker}")
+    st.stop()
 
 # ---------------- TA-Lib Indicators ----------------
 indicator_payloads = []
 
-if talib:
+if talib and not data.empty and "Close" in data.columns:
     close_np = data["Close"].values
     idx_ts = data.index
 
     if "RSI" in indicators_selected:
-        rsi = talib.RSI(close_np, timeperiod=14)
-        rsi_data = [{"time": int(ts.timestamp()), "value": float(val)} for ts, val in zip(idx_ts, rsi) if not pd.isna(val)]
-        indicator_payloads.append({"name": "RSI", "type": "line", "color": "purple", "data": rsi_data})
+        try:
+            rsi = talib.RSI(close_np, timeperiod=14)
+            rsi_data = [{"time": int(ts.timestamp()), "value": float(val)} for ts, val in zip(idx_ts, rsi) if not pd.isna(val)]
+            if rsi_data:
+                indicator_payloads.append({"name": "RSI", "type": "line", "color": "purple", "data": rsi_data})
+        except Exception as e:
+            st.warning(f"RSI calculation failed: {str(e)}")
 
     if "MACD" in indicators_selected:
-        macd, macd_signal, macd_hist = talib.MACD(close_np, fastperiod=12, slowperiod=26, signalperiod=9)
-        macd_data = [{"time": int(ts.timestamp()), "value": float(val)} for ts, val in zip(idx_ts, macd) if not pd.isna(val)]
-        indicator_payloads.append({"name": "MACD", "type": "line", "color": "teal", "data": macd_data})
+        try:
+            macd, macd_signal, macd_hist = talib.MACD(close_np, fastperiod=12, slowperiod=26, signalperiod=9)
+            macd_data = [{"time": int(ts.timestamp()), "value": float(val)} for ts, val in zip(idx_ts, macd) if not pd.isna(val)]
+            if macd_data:
+                indicator_payloads.append({"name": "MACD", "type": "line", "color": "teal", "data": macd_data})
+        except Exception as e:
+            st.warning(f"MACD calculation failed: {str(e)}")
 
     if "Bollinger Bands" in indicators_selected:
-        upper, middle, lower = talib.BBANDS(close_np, timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
-        upper_data = [{"time": int(ts.timestamp()), "value": float(val)} for ts, val in zip(idx_ts, upper) if not pd.isna(val)]
-        lower_data = [{"time": int(ts.timestamp()), "value": float(val)} for ts, val in zip(idx_ts, lower) if not pd.isna(val)]
-        indicator_payloads.append({"name": "Upper Band", "type": "line", "color": "#FFB6C1", "data": upper_data})
-        indicator_payloads.append({"name": "Lower Band", "type": "line", "color": "#87CEFA", "data": lower_data})
+        try:
+            upper, middle, lower = talib.BBANDS(close_np, timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
+            upper_data = [{"time": int(ts.timestamp()), "value": float(val)} for ts, val in zip(idx_ts, upper) if not pd.isna(val)]
+            lower_data = [{"time": int(ts.timestamp()), "value": float(val)} for ts, val in zip(idx_ts, lower) if not pd.isna(val)]
+            if upper_data and lower_data:
+                indicator_payloads.append({"name": "Upper Band", "type": "line", "color": "#FFB6C1", "data": upper_data})
+                indicator_payloads.append({"name": "Lower Band", "type": "line", "color": "#87CEFA", "data": lower_data})
+        except Exception as e:
+            st.warning(f"Bollinger Bands calculation failed: {str(e)}")
 
 # else no talib -> warn user
 elif indicators_selected:
-    st.warning("TA-Lib not available. Install dependencies to enable indicators.")
+    if not talib:
+        st.warning("TA-Lib not available. Install dependencies to enable indicators.")
+    elif data.empty:
+        st.warning("No data available for technical indicators.")
 
 # ---------------- Async price fetch helpers ----------------
 async def _fetch_quote(session, ticker: str):
@@ -875,32 +1022,38 @@ if av == 'PF':
     st.markdown("Upload a CSV with columns `Ticker,Quantity` or input manually:")
 
     sample_df = pd.DataFrame({'Ticker': ['AAPL', 'MSFT', 'GOOGL'], 'Quantity': [10, 5, 2]})
-    positions_df = st.experimental_data_editor(sample_df, num_rows='dynamic')
+    positions_df = st.data_editor(sample_df, num_rows='dynamic', use_container_width=True)
 
     if st.button('Run Analytics'):
         # Prepare positions Series
-        positions_series = positions_df.set_index('Ticker')['Quantity'].astype(float).replace({np.nan: 0})
-        symbols = positions_series[positions_series > 0].index.tolist()
-        if not symbols:
-            st.error('No positions specified.')
-        else:
-            with st.spinner('Fetching prices and computing metrics...'):
-                price_df = get_prices(symbols, period='1y')
-                result = compute_portfolio_metrics(price_df, positions_series)
+        try:
+            positions_series = positions_df.set_index('Ticker')['Quantity'].astype(float).replace({np.nan: 0})
+            symbols = positions_series[positions_series > 0].index.tolist()
+            if not symbols:
+                st.error('No positions specified.')
+            else:
+                with st.spinner('Fetching prices and computing metrics...'):
+                    price_df = get_prices(symbols, period='1y')
+                    if price_df.empty:
+                        st.error('Could not fetch price data for portfolio analysis.')
+                    else:
+                        result = compute_portfolio_metrics(price_df, positions_series)
 
-            st.subheader('Risk Metrics')
-            col1, col2, col3 = st.columns(3)
-            col1.metric('Sharpe', f"{result['sharpe']:.2f}")
-            col2.metric('Sortino', f"{result['sortino']:.2f}")
-            col3.metric('Historical VaR (95%)', f"{result['VaR']:.0f}")
+                        st.subheader('Risk Metrics')
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric('Sharpe', f"{result['sharpe']:.2f}" if not pd.isna(result['sharpe']) else "N/A")
+                        col2.metric('Sortino', f"{result['sortino']:.2f}" if not pd.isna(result['sortino']) else "N/A")
+                        col3.metric('Historical VaR (95%)', f"{result['VaR']:.0f}" if not pd.isna(result['VaR']) else "N/A")
 
-            st.subheader('Allocation')
-            alloc_df = result['weights'] * 100
-            st.bar_chart(alloc_df)
+                        st.subheader('Allocation')
+                        alloc_df = result['weights'] * 100
+                        st.bar_chart(alloc_df)
 
-            st.subheader('Performance (Cumulative)')
-            perf_df = result['cumulative'].to_frame('Portfolio')
-            st.line_chart(perf_df)
+                        st.subheader('Performance (Cumulative)')
+                        perf_df = result['cumulative'].to_frame('Portfolio')
+                        st.line_chart(perf_df)
+        except Exception as e:
+            st.error(f"Portfolio analysis failed: {str(e)}")
 
     st.stop()
 
