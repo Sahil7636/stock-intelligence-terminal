@@ -4,3 +4,5 @@ pandas
 TA-Lib
 aiohttp
 fastparquet
+numpy
+requests

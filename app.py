@@ -11,6 +11,7 @@ import pandas as pd
 from statsmodels.tsa.arima.model import ARIMA
 from datetime import timedelta
 import datetime as dt
+import numpy as np
 
 # For news
 import requests
@@ -35,12 +36,16 @@ st.title("📊 Stock Intelligence Terminal")
 COMMAND_PLACEHOLDER = "e.g., AAPL FA  |  TSLA CH  |  MSFT IS"
 
 def parse_command(cmd: str):
-    """Parse command string like 'AAPL FA' and return ticker, view code."""
+    """Parse command string and return (ticker, view). If first token is a view code
+    (SC, NW, PF) treat ticker as None."""
     if not cmd:
         return None, None
     parts = cmd.upper().strip().split()
     if not parts:
         return None, None
+    view_codes = {'CH', 'FA', 'GO', 'IS', 'BS', 'CF', 'SC', 'NW', 'PF'}
+    if parts[0] in view_codes and len(parts) == 1:
+        return None, parts[0]
     ticker_part = parts[0]
     view = parts[1] if len(parts) > 1 else None
     return ticker_part, view
@@ -553,8 +558,93 @@ with right:
         except Exception:
             st.error("Cash flow statement not available.")
 
-# ---------------- Screener View ----------------
+# ---------------- Portfolio helpers ----------------
+@st.cache_data(ttl=3600)
+def get_prices(tickers, period="1y"):
+    """Download adjusted close prices for tickers."""
+    data = yf.download(tickers=tickers, period=period, auto_adjust=True, threads=True, group_by="ticker")
+    if isinstance(tickers, str):
+        return data['Close'].to_frame(tickers)
+    if isinstance(data.columns, pd.MultiIndex):
+        close = data.loc[:, pd.IndexSlice[:, 'Close']]
+        close.columns = close.columns.get_level_values(0)
+        return close
+    else:
+        return data
+
+# ---------------- Portfolio analytics functions ----------------
+
+def compute_portfolio_metrics(prices: pd.DataFrame, positions: pd.Series):
+    # Align positions index with prices columns
+    positions = positions[positions > 0]
+    prices = prices[positions.index].dropna()
+    values = prices * positions
+    weights = values.div(values.sum(axis=1), axis=0)
+
+    returns = prices.pct_change().dropna()
+    port_returns = (returns * (positions / (positions * prices.iloc[0]).sum())).sum(axis=1)
+
+    mean_daily = port_returns.mean()
+    std_daily = port_returns.std()
+    sharpe = mean_daily / std_daily * np.sqrt(252) if std_daily else np.nan
+
+    downside = port_returns[port_returns < 0]
+    sortino = mean_daily / downside.std() * np.sqrt(252) if not downside.empty else np.nan
+
+    var95 = np.percentile(port_returns, 5) * values.sum(axis=1).iloc[-1]
+
+    cumulative = (1 + port_returns).cumprod()
+
+    return {
+        'weights': (positions * prices.iloc[-1]) / (positions * prices.iloc[-1]).sum(),
+        'cumulative': cumulative,
+        'returns': port_returns,
+        'sharpe': sharpe,
+        'sortino': sortino,
+        'VaR': var95,
+    }
+
+# Screener view previously inserted, before st.stop() call. We inserted st.stop, which ends script; we need to ensure portfolio view earlier than stop. We'll adjust ordering: place Screener and News views earlier else they call st.stop. Let's integrate after those but before earlier stops. We added st.stop inside screener and news; so PF view must add elif before. We'll add before screener.
+
+# ---------------- Portfolio View ----------------
 av = st.session_state.get('active_view')
+
+if av == 'PF':
+    st.header("📊 Portfolio Analytics")
+
+    st.markdown("Upload a CSV with columns `Ticker,Quantity` or input manually:")
+
+    sample_df = pd.DataFrame({'Ticker': ['AAPL', 'MSFT', 'GOOGL'], 'Quantity': [10, 5, 2]})
+    positions_df = st.experimental_data_editor(sample_df, num_rows='dynamic')
+
+    if st.button('Run Analytics'):
+        # Prepare positions Series
+        positions_series = positions_df.set_index('Ticker')['Quantity'].astype(float).replace({np.nan: 0})
+        symbols = positions_series[positions_series > 0].index.tolist()
+        if not symbols:
+            st.error('No positions specified.')
+        else:
+            with st.spinner('Fetching prices and computing metrics...'):
+                price_df = get_prices(symbols, period='1y')
+                result = compute_portfolio_metrics(price_df, positions_series)
+
+            st.subheader('Risk Metrics')
+            col1, col2, col3 = st.columns(3)
+            col1.metric('Sharpe', f"{result['sharpe']:.2f}")
+            col2.metric('Sortino', f"{result['sortino']:.2f}")
+            col3.metric('Historical VaR (95%)', f"{result['VaR']:.0f}")
+
+            st.subheader('Allocation')
+            alloc_df = result['weights'] * 100
+            st.bar_chart(alloc_df)
+
+            st.subheader('Performance (Cumulative)')
+            perf_df = result['cumulative'].to_frame('Portfolio')
+            st.line_chart(perf_df)
+
+    st.stop()
+
+# ---------------- Screener View ----------------
 if av == 'SC':
     st.header("🗂 Stock Screener (S&P 500)")
 
