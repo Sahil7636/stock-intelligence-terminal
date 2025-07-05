@@ -1,6 +1,8 @@
 import streamlit as st
 import yfinance as yf
-import plotly.graph_objects as go
+# Replaced Plotly with TradingView Lightweight Charts
+import json
+import streamlit.components.v1 as components
 import pandas as pd
 from statsmodels.tsa.arima.model import ARIMA
 from datetime import timedelta
@@ -137,37 +139,87 @@ left, right = st.columns((2, 1))
 with left:
     st.subheader("📈 Price Chart")
 
-    fig = go.Figure()
-    if chart_type == "Candlestick":
-        fig.add_trace(go.Candlestick(
-            x=data.index, open=data['Open'], high=data['High'],
-            low=data['Low'], close=data['Close'], name='Candlestick'))
-    elif chart_type == "Line":
-        fig.add_trace(go.Scatter(x=data.index, y=data["Close"], mode="lines", name="Close"))
-    elif chart_type == "Bar":
-        fig.add_trace(go.Bar(x=data.index, y=data["Close"], name="Bar"))
+    # -------- TradingView Lightweight Charts integration --------
+    # Build data payloads depending on selected chart type
+    if chart_type in ("Candlestick", "Bar"):
+        chart_data = [
+            {"time": int(ts.timestamp()), "open": float(o), "high": float(h), "low": float(l), "close": float(c)}
+            for ts, o, h, l, c in zip(data.index, data["Open"], data["High"], data["Low"], data["Close"])
+        ]
+    else:  # Line chart
+        chart_data = [
+            {"time": int(ts.timestamp()), "value": float(v)}
+            for ts, v in zip(data.index, data["Close"])
+        ]
 
-    if show_ma:
-        fig.add_trace(go.Scatter(
-            x=data.index, y=data["MA20"], mode="lines", name="MA20",
-            line=dict(color='orange', dash='dash')))
+    ma_data = None
+    if show_ma and chart_type != "Bar":
+        ma_data = [
+            {"time": int(ts.timestamp()), "value": float(v)}
+            for ts, v in zip(data.index, data["MA20"])
+        ]
 
+    forecast_data = None
     if forecast_series is not None:
-        fig.add_trace(go.Scatter(
-            x=forecast_series.index, y=forecast_series.values,
-            mode="lines", name="ARIMA Forecast",
-            line=dict(color='green', dash='dot')))
+        forecast_data = [
+            {"time": int(ts.timestamp()), "value": float(v)}
+            for ts, v in forecast_series.items()
+        ]
 
-    fig.update_layout(
-        hovermode="x unified",
-        xaxis_rangeslider_visible=True,
-        height=500,
-        margin=dict(l=10, r=10, t=30, b=10),
-        plot_bgcolor="#f4f4f4",
-        paper_bgcolor="#f4f4f4",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    payload = json.dumps(
+        {
+            "series_type": chart_type.lower(),
+            "chart_data": chart_data,
+            "ma_data": ma_data,
+            "forecast_data": forecast_data,
+        }
     )
-    st.plotly_chart(fig, use_container_width=True)
+
+    html_content = f"""
+    <div id='tv_chart' style='width:100%;height:500px;'></div>
+    <script src='https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js'></script>
+    <script>
+    const container = document.getElementById('tv_chart');
+    const chart = LightweightCharts.createChart(container, {{
+        layout: {{ backgroundColor: '#f4f4f4', textColor: '#333' }},
+        grid: {{ vertLines: {{ color: '#e1e3e8' }}, horzLines: {{ color: '#e1e3e8' }} }},
+        width: container.clientWidth,
+        height: 500,
+        timeScale: {{ borderVisible: false }},
+        rightPriceScale: {{ borderVisible: false }},
+    }});
+
+    const payload = {payload};
+    let mainSeries;
+    switch(payload.series_type) {{
+        case 'candlestick':
+            mainSeries = chart.addCandlestickSeries();
+            break;
+        case 'bar':
+            mainSeries = chart.addBarSeries();
+            break;
+        default:
+            mainSeries = chart.addLineSeries();
+    }}
+    mainSeries.setData(payload.chart_data);
+
+    if (payload.ma_data) {{
+        const maSeries = chart.addLineSeries({{ color: 'orange', lineWidth: 1, lineStyle: 1 }});
+        maSeries.setData(payload.ma_data);
+    }}
+
+    if (payload.forecast_data) {{
+        const forecastSeries = chart.addLineSeries({{ color: 'green', lineWidth: 1, lineStyle: 2 }});
+        forecastSeries.setData(payload.forecast_data);
+    }}
+
+    window.addEventListener('resize', () => {{
+        chart.applyOptions({{ width: container.clientWidth }});
+    }});
+    </script>
+    """
+
+    components.html(html_content, height=520)
 
     st.markdown("#### 🔍 Data Preview")
     st.dataframe(data.tail(10), use_container_width=True, height=200)
