@@ -222,7 +222,33 @@ with left:
     )
 
     html_content = f"""
-    <div id='tv_chart' style='width:100%;height:500px;'></div>
+    <style>
+    .toolbar {{
+        position:absolute;
+        top:10px;
+        left:10px;
+        z-index:1000;
+        background:rgba(255,255,255,0.85);
+        border-radius:4px;
+        padding:4px;
+        font-family:sans-serif;
+    }}
+    .toolbar button {{
+        margin:2px;
+        padding:4px 6px;
+        font-size:12px;
+        cursor:pointer;
+    }}
+    </style>
+    <div style='position:relative;width:100%;height:500px;'>
+        <div id='tv_chart' style='width:100%;height:500px;'></div>
+        <div id='toolbar' class='toolbar'>
+            <button id='btnLine'>Trend</button>
+            <button id='btnHLine'>H&nbsp;Line</button>
+            <button id='btnFib'>Fib</button>
+            <button id='btnClear'>Clear</button>
+        </div>
+    </div>
     <script src='https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js'></script>
     <script>
     const container = document.getElementById('tv_chart');
@@ -236,7 +262,6 @@ with left:
     }});
 
     const payload = {payload};
-
     const enableRealtime = payload.enable_realtime && payload.ws_token;
 
     let mainSeries;
@@ -252,16 +277,64 @@ with left:
     }}
     mainSeries.setData(payload.chart_data);
 
+    // ---------- Drawing tools ----------
+    const drawings = [];
+    let drawingMode = null;
+    let firstPoint = null;
+    document.getElementById('btnLine').onclick = () => {{ drawingMode = 'line'; firstPoint=null; }};
+    document.getElementById('btnHLine').onclick = () => {{ drawingMode = 'hline'; firstPoint=null; }};
+    document.getElementById('btnFib').onclick = () => {{ drawingMode = 'fib'; firstPoint=null; }};
+    document.getElementById('btnClear').onclick = () => {{ drawings.forEach(s => chart.removeSeries(s)); drawings.length = 0; }};
+
+    chart.subscribeClick(param => {{
+        if (!drawingMode || param.time === undefined || param.price === undefined) return;
+        if (!firstPoint) {{
+            firstPoint = param;
+            return;
+        }}
+        const leftTime = payload.chart_data[0].time;
+        const rightTime = payload.chart_data[payload.chart_data.length-1].time;
+        switch(drawingMode) {{
+            case 'line': {{
+                const s = chart.addLineSeries({{ color: 'red', lineWidth: 1 }});
+                s.setData([{{ time:firstPoint.time, value:firstPoint.price }}, {{ time:param.time, value:param.price }}]);
+                drawings.push(s);
+                break;
+            }}
+            case 'hline': {{
+                const s = chart.addLineSeries({{ color: 'blue', lineWidth: 1 }});
+                s.setData([{{ time:leftTime, value:firstPoint.price }}, {{ time:rightTime, value:firstPoint.price }}]);
+                drawings.push(s);
+                break;
+            }}
+            case 'fib': {{
+                const minP = Math.min(firstPoint.price, param.price);
+                const maxP = Math.max(firstPoint.price, param.price);
+                const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+                levels.forEach(lvl => {{
+                    const p = maxP - (maxP - minP) * lvl;
+                    const s = chart.addLineSeries({{ color: '#FFA500', lineWidth: 1, lineStyle: 2 }});
+                    s.setData([{{ time:firstPoint.time, value:p }}, {{ time:param.time, value:p }}]);
+                    drawings.push(s);
+                }});
+                break;
+            }}
+        }}
+        firstPoint = null;
+        drawingMode = null;
+    }});
+    // ---------- End Drawing tools ----------
+
     // Add technical indicators as separate line series
-    if (payload.indicators) {
-        payload.indicators.forEach(ind => {
-            const series = chart.addLineSeries({ color: ind.color || 'grey', lineWidth: 1 });
+    if (payload.indicators) {{
+        payload.indicators.forEach(ind => {{
+            const series = chart.addLineSeries({{ color: ind.color || 'grey', lineWidth: 1 }});
             series.setData(ind.data);
-        });
-    }
+        }});
+    }}
 
     if (enableRealtime) {{
-        const ws = new WebSocket(`wss://ws.finnhub.io?token=${payload.ws_token}`);
+        const ws = new WebSocket(`wss://ws.finnhub.io?token=${{payload.ws_token}}`);
         ws.addEventListener('open', () => {{
             ws.send(JSON.stringify({{ type: 'subscribe', symbol: payload.ticker }}));
         }});
@@ -275,7 +348,7 @@ with left:
                         : {{ time: Math.floor(pt.t/1000), value: pt.p }};
                     mainSeries.update(updateObj);
                 }});
-            }
+            }}
         }});
     }}
 
