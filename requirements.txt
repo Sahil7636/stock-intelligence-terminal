@@ -1,6 +1,7 @@
-streamlit
-yfinance
-pandas
-plotly
-numpy
-requests
+streamlit==1.46.1
+yfinance==0.2.64
+plotly==6.2.0
+pandas==2.3.0
+numpy==2.3.1
+scikit-learn==1.4.2
+statsmodels==0.14.1
