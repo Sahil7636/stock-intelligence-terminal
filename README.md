@@ -8,11 +8,8 @@ A powerful and interactive **Stock Analysis Dashboard** built with **Python**, *
 - 📋 Analyze key financial ratios like PE, PB, ROE, ROA, and more  
 - 🌐 Compare stocks from India (NSE) and USA (NASDAQ)
 
-## 🚀 Live Demo
+## 🚀 Live Demo soon
 
-👉 [Click here to view the app](https://sahil7636-stock-intelligence-terminal.streamlit.app)
-
----
 
 
 ## 🔧 Features
