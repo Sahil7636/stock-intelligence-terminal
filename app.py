@@ -4,6 +4,8 @@ import plotly.graph_objects as go
 import pandas as pd
 from statsmodels.tsa.arima.model import ARIMA
 from datetime import timedelta
+import asyncio
+import aiohttp
 
 st.set_page_config(page_title="📈 Stock Intelligence Terminal", layout="wide")
 
@@ -47,9 +49,30 @@ data = data.asfreq('B')
 data["Close"].interpolate(method='linear', inplace=True)
 data["MA20"] = data["Close"].rolling(20).mean()
 
-# Current price
+# ---------------- Async price fetch helpers ----------------
+async def _fetch_quote(session, ticker: str):
+    """Fetch a single quote from Yahoo Finance REST endpoint."""
+    url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={ticker}"
+    async with session.get(url) as resp:
+        data = await resp.json()
+    result = data.get("quoteResponse", {}).get("result", [])
+    return ticker, (result[0] if result else {})
+
+async def _fetch_quotes_async(tickers):
+    async with aiohttp.ClientSession() as session:
+        tasks = [_fetch_quote(session, t) for t in tickers]
+        return await asyncio.gather(*tasks)
+
+@st.cache_data(ttl=60)
+def get_current_prices(tickers):
+    """Synchronous wrapper so Streamlit can cache the async quote fetch."""
+    results = asyncio.run(_fetch_quotes_async(tickers))
+    # Convert list[tuple] -> dict[str, dict]
+    return {t: r for t, r in results if r}
+
+# Current price using async fetch
 try:
-    current_price = yf.Ticker(ticker).history(period="1d")["Close"].iloc[-1]
+    current_price = get_current_prices([ticker])[ticker]["regularMarketPrice"]
     st.sidebar.metric("📍 Current Price", f"{current_price:.2f}")
 except Exception:
     st.sidebar.warning("⚠️ Current price unavailable.")
