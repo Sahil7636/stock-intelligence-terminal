@@ -1,66 +1,71 @@
 /* style.css */
 /* Bloomberg Terminal Professional Theme */
 
-/* Main Background - Bloomberg Dark */
+/* Main Background - Professional Dark */
 .stApp {
-    background-color: #0a0a0a !important;
+    background-color: #1e1e1e !important;
     color: #ffffff !important;
 }
 
-/* Sidebar Bloomberg Orange */
+/* Sidebar Professional */
 .css-1d391kg {
-    background-color: #1a1a1a !important;
+    background-color: #2d2d2d !important;
     border-right: 2px solid #ff6600 !important;
 }
 
-/* Headers - Bloomberg Orange */
+/* Headers - Orange with White Text */
 h1, h2, h3, h4, h5, h6 {
     color: #ff6600 !important;
-    font-family: 'Courier New', monospace !important;
+    font-family: 'Arial', sans-serif !important;
     font-weight: bold !important;
 }
 
 /* Main Title */
 h1 {
-    background: linear-gradient(90deg, #ff6600, #ffaa00) !important;
-    -webkit-background-clip: text !important;
-    -webkit-text-fill-color: transparent !important;
+    color: #ff6600 !important;
     text-align: center !important;
     font-size: 2.5rem !important;
     margin-bottom: 2rem !important;
 }
 
-/* Metrics Cards - Bloomberg Style */
+/* All text elements white */
+.stApp p, .stApp span, .stApp div, .stApp label {
+    color: #ffffff !important;
+}
+
+/* Metrics Cards - Professional Style */
 .stMetric {
-    background-color: #1a1a1a !important;
-    border: 1px solid #333333 !important;
-    border-radius: 4px !important;
-    padding: 12px !important;
-    box-shadow: 0 2px 4px rgba(255, 102, 0, 0.1) !important;
+    background-color: #2d2d2d !important;
+    border: 1px solid #555555 !important;
+    border-radius: 8px !important;
+    padding: 16px !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
 }
 
 .stMetric label {
     color: #cccccc !important;
-    font-family: 'Courier New', monospace !important;
+    font-family: 'Arial', sans-serif !important;
     font-size: 0.9rem !important;
+    font-weight: 500 !important;
 }
 
 .stMetric div[data-testid="metric-value"] {
-    color: #00ff00 !important;
-    font-family: 'Courier New', monospace !important;
+    color: #00ff88 !important;
+    font-family: 'Arial', sans-serif !important;
     font-weight: bold !important;
-    font-size: 1.4rem !important;
+    font-size: 1.6rem !important;
 }
 
-/* Data Tables - Terminal Style */
+/* Data Tables - Professional Style */
 .stDataFrame {
-    background-color: #0a0a0a !important;
-    border: 1px solid #333333 !important;
-    font-family: 'Courier New', monospace !important;
+    background-color: #2d2d2d !important;
+    border: 1px solid #555555 !important;
+    font-family: 'Arial', sans-serif !important;
+    color: #ffffff !important;
 }
 
 .stDataFrame th {
-    background-color: #1a1a1a !important;
+    background-color: #3d3d3d !important;
     color: #ff6600 !important;
     font-weight: bold !important;
     border-bottom: 2px solid #ff6600 !important;
@@ -68,99 +73,129 @@ h1 {
 
 .stDataFrame td {
     color: #ffffff !important;
-    border-bottom: 1px solid #333333 !important;
+    border-bottom: 1px solid #555555 !important;
+    background-color: #2d2d2d !important;
 }
 
-/* Input Fields - Terminal Style */
-.stTextInput input {
-    background-color: #1a1a1a !important;
+/* Input Fields - Professional Style */
+.stTextInput input, .stTextArea textarea {
+    background-color: #3d3d3d !important;
     color: #ffffff !important;
-    border: 1px solid #ff6600 !important;
-    border-radius: 4px !important;
-    font-family: 'Courier New', monospace !important;
+    border: 2px solid #ff6600 !important;
+    border-radius: 6px !important;
+    font-family: 'Arial', sans-serif !important;
+    padding: 8px 12px !important;
 }
 
-.stTextInput input:focus {
+.stTextInput input:focus, .stTextArea textarea:focus {
     border-color: #ffaa00 !important;
-    box-shadow: 0 0 5px rgba(255, 102, 0, 0.5) !important;
+    box-shadow: 0 0 8px rgba(255, 102, 0, 0.4) !important;
+    outline: none !important;
 }
 
-/* Buttons - Bloomberg Style */
+/* Buttons - Professional Style */
 .stButton button {
     background-color: #ff6600 !important;
     color: #ffffff !important;
     border: none !important;
-    border-radius: 4px !important;
-    font-family: 'Courier New', monospace !important;
+    border-radius: 6px !important;
+    font-family: 'Arial', sans-serif !important;
     font-weight: bold !important;
-    padding: 8px 16px !important;
+    padding: 10px 20px !important;
     transition: all 0.3s ease !important;
+    font-size: 14px !important;
 }
 
 .stButton button:hover {
     background-color: #ffaa00 !important;
-    transform: translateY(-1px) !important;
-    box-shadow: 0 4px 8px rgba(255, 102, 0, 0.3) !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 4px 12px rgba(255, 102, 0, 0.4) !important;
 }
 
-/* Selectbox - Terminal Style */
+/* Selectbox - Professional Style */
 .stSelectbox select {
-    background-color: #1a1a1a !important;
+    background-color: #3d3d3d !important;
     color: #ffffff !important;
-    border: 1px solid #ff6600 !important;
-    font-family: 'Courier New', monospace !important;
+    border: 2px solid #ff6600 !important;
+    font-family: 'Arial', sans-serif !important;
+    border-radius: 6px !important;
+    padding: 8px !important;
+}
+
+.stSelectbox label {
+    color: #ffffff !important;
+    font-weight: 500 !important;
 }
 
 /* Info/Warning Boxes */
 .stInfo {
-    background-color: #1a1a1a !important;
+    background-color: #2d3d4d !important;
     border-left: 4px solid #00aaff !important;
     color: #ffffff !important;
-    font-family: 'Courier New', monospace !important;
+    font-family: 'Arial', sans-serif !important;
+    border-radius: 4px !important;
 }
 
 .stWarning {
-    background-color: #1a1a1a !important;
+    background-color: #4d3d2d !important;
     border-left: 4px solid #ffaa00 !important;
     color: #ffffff !important;
-    font-family: 'Courier New', monospace !important;
+    font-family: 'Arial', sans-serif !important;
+    border-radius: 4px !important;
 }
 
 .stError {
-    background-color: #1a1a1a !important;
-    border-left: 4px solid #ff0000 !important;
+    background-color: #4d2d2d !important;
+    border-left: 4px solid #ff4444 !important;
     color: #ffffff !important;
-    font-family: 'Courier New', monospace !important;
+    font-family: 'Arial', sans-serif !important;
+    border-radius: 4px !important;
+}
+
+.stSuccess {
+    background-color: #2d4d2d !important;
+    border-left: 4px solid #44ff44 !important;
+    color: #ffffff !important;
+    font-family: 'Arial', sans-serif !important;
+    border-radius: 4px !important;
 }
 
 /* Charts Container */
 .stPlotlyChart {
-    background-color: #0a0a0a !important;
-    border: 1px solid #333333 !important;
-    border-radius: 4px !important;
+    background-color: #2d2d2d !important;
+    border: 1px solid #555555 !important;
+    border-radius: 8px !important;
 }
 
 /* Sidebar Elements */
 .stSidebar .stSelectbox label,
 .stSidebar .stCheckbox label,
-.stSidebar .stRadio label {
-    color: #cccccc !important;
-    font-family: 'Courier New', monospace !important;
+.stSidebar .stRadio label,
+.stSidebar .stTextInput label {
+    color: #ffffff !important;
+    font-family: 'Arial', sans-serif !important;
+    font-weight: 500 !important;
 }
 
-/* Terminal-style scrollbars */
+/* Checkbox and Radio */
+.stCheckbox, .stRadio {
+    color: #ffffff !important;
+}
+
+/* Professional scrollbars */
 ::-webkit-scrollbar {
-    width: 8px !important;
-    height: 8px !important;
+    width: 12px !important;
+    height: 12px !important;
 }
 
 ::-webkit-scrollbar-track {
-    background: #1a1a1a !important;
+    background: #2d2d2d !important;
+    border-radius: 6px !important;
 }
 
 ::-webkit-scrollbar-thumb {
     background: #ff6600 !important;
-    border-radius: 4px !important;
+    border-radius: 6px !important;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -168,27 +203,68 @@ h1 {
 }
 
 /* Command Input Special Styling */
-.stTextInput[data-testid="command-input"] input {
-    background-color: #000000 !important;
-    color: #00ff00 !important;
-    border: 2px solid #ff6600 !important;
-    font-family: 'Courier New', monospace !important;
-    font-size: 1.1rem !important;
+.command-input input {
+    background-color: #1a1a1a !important;
+    color: #00ff88 !important;
+    border: 3px solid #ff6600 !important;
+    font-family: 'Consolas', 'Monaco', monospace !important;
+    font-size: 1.2rem !important;
     font-weight: bold !important;
+    border-radius: 8px !important;
+    padding: 12px !important;
 }
 
 /* Market Status Indicators */
 .market-open {
-    color: #00ff00 !important;
+    color: #00ff88 !important;
     font-weight: bold !important;
 }
 
 .market-closed {
-    color: #ff0000 !important;
+    color: #ff4444 !important;
     font-weight: bold !important;
 }
 
 .market-pre {
     color: #ffaa00 !important;
     font-weight: bold !important;
+}
+
+/* Multiselect */
+.stMultiSelect {
+    color: #ffffff !important;
+}
+
+.stMultiSelect label {
+    color: #ffffff !important;
+}
+
+/* Slider */
+.stSlider label {
+    color: #ffffff !important;
+}
+
+/* Progress bar */
+.stProgress .stProgress-bar {
+    background-color: #ff6600 !important;
+}
+
+/* Expander */
+.streamlit-expanderHeader {
+    background-color: #3d3d3d !important;
+    color: #ffffff !important;
+}
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] {
+    background-color: #2d2d2d !important;
+}
+
+.stTabs [data-baseweb="tab"] {
+    color: #ffffff !important;
+}
+
+/* Caption text */
+.caption {
+    color: #cccccc !important;
 }

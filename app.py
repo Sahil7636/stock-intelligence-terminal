@@ -20,6 +20,7 @@ import aiohttp
 import os
 from pathlib import Path
 import time # Added for retry logic
+from difflib import SequenceMatcher
 
 st.set_page_config(page_title="📈 Stock Intelligence Terminal", layout="wide")
 
@@ -98,6 +99,80 @@ def get_symbol_info(symbol: str):
 # --------------- Bloomberg-style Command Interface ---------------
 
 COMMAND_PLACEHOLDER = "e.g., AAPL FA | ES=F CH | EURUSD=X GO | BTC-USD OP | SC | PF"
+
+# Command suggestions database
+COMMAND_SUGGESTIONS = {
+    # Stock examples
+    'AAPL': 'Apple Inc.',
+    'MSFT': 'Microsoft Corporation',
+    'GOOGL': 'Alphabet Inc.',
+    'TSLA': 'Tesla Inc.',
+    'AMZN': 'Amazon.com Inc.',
+    'META': 'Meta Platforms Inc.',
+    'NVDA': 'NVIDIA Corporation',
+    'AMD': 'Advanced Micro Devices',
+    
+    # Futures
+    'ES=F': 'S&P 500 E-mini Futures',
+    'NQ=F': 'NASDAQ 100 E-mini Futures',
+    'YM=F': 'Dow Jones E-mini Futures',
+    'GC=F': 'Gold Futures',
+    'CL=F': 'Crude Oil Futures',
+    'NG=F': 'Natural Gas Futures',
+    
+    # Forex
+    'EURUSD=X': 'Euro to US Dollar',
+    'GBPUSD=X': 'British Pound to US Dollar',
+    'USDJPY=X': 'US Dollar to Japanese Yen',
+    'USDCAD=X': 'US Dollar to Canadian Dollar',
+    'AUDUSD=X': 'Australian Dollar to US Dollar',
+    
+    # Crypto
+    'BTC-USD': 'Bitcoin',
+    'ETH-USD': 'Ethereum',
+    'ADA-USD': 'Cardano',
+    'DOT-USD': 'Polkadot',
+    'LINK-USD': 'Chainlink',
+    
+    # Commands
+    'FA': 'Fundamental Analysis',
+    'CH': 'Chart View',
+    'IS': 'Income Statement',
+    'BS': 'Balance Sheet',
+    'CF': 'Cash Flow',
+    'OP': 'Options Chain',
+    'SC': 'Stock Screener',
+    'PF': 'Portfolio Analytics',
+    'NW': 'News',
+    'WL': 'Watchlist'
+}
+
+def fuzzy_search(query: str, suggestions: dict, threshold: float = 0.3):
+    """Fuzzy search with similarity matching."""
+    if not query:
+        return []
+    
+    query = query.upper().strip()
+    matches = []
+    
+    for symbol, description in suggestions.items():
+        # Exact match
+        if symbol.startswith(query):
+            matches.append((symbol, description, 1.0))
+        # Fuzzy match
+        elif query in symbol:
+            ratio = SequenceMatcher(None, query, symbol).ratio()
+            if ratio >= threshold:
+                matches.append((symbol, description, ratio))
+        # Description match
+        elif query.lower() in description.lower():
+            ratio = SequenceMatcher(None, query.lower(), description.lower()).ratio()
+            if ratio >= threshold:
+                matches.append((symbol, description, ratio * 0.8))  # Lower priority for description matches
+    
+    # Sort by similarity score (descending)
+    matches.sort(key=lambda x: x[2], reverse=True)
+    return matches[:10]  # Return top 10 matches
 
 def parse_command(cmd: str):
     """Parse command string and return (ticker, view). If first token is a view code
@@ -179,6 +254,18 @@ def get_company_news(symbol: str, token: str):
     return []
 
 cmd_input = st.text_input("💬 Command", value=st.session_state['command'], placeholder=COMMAND_PLACEHOLDER)
+
+# Show command suggestions if user is typing
+if cmd_input and len(cmd_input) >= 2:
+    suggestions = fuzzy_search(cmd_input, COMMAND_SUGGESTIONS)
+    if suggestions:
+        st.markdown("**💡 Suggestions:**")
+        suggestion_cols = st.columns(min(3, len(suggestions)))
+        for i, (symbol, description, score) in enumerate(suggestions[:3]):
+            with suggestion_cols[i]:
+                if st.button(f"**{symbol}**\n{description[:30]}{'...' if len(description) > 30 else ''}", key=f"suggest_{i}"):
+                    st.session_state['command'] = symbol
+                    st.rerun()
 
 # If command changed, update session state
 if cmd_input != st.session_state['command']:
@@ -414,204 +501,252 @@ with left:
     if show_chart:
         st.subheader("📈 Price Chart")
 
-    # -------- TradingView Lightweight Charts integration --------
-    # Build data payloads depending on selected chart type
-    if chart_type in ("Candlestick", "Bar"):
-        chart_data = [
-            {"time": int(ts.timestamp()), "open": float(o), "high": float(h), "low": float(l), "close": float(c)}
-            for ts, o, h, l, c in zip(data.index, data["Open"], data["High"], data["Low"], data["Close"])
-        ]
-    else:  # Line chart
-        chart_data = [
-            {"time": int(ts.timestamp()), "value": float(v)}
-            for ts, v in zip(data.index, data["Close"])
-        ]
+    # Check if data is available
+    if data.empty:
+        st.error(f"No chart data available for {ticker}")
+    else:
+        # -------- TradingView Lightweight Charts integration --------
+        # Build data payloads depending on selected chart type
+        try:
+            if chart_type in ("Candlestick", "Bar"):
+                chart_data = [
+                    {"time": int(ts.timestamp()), "open": float(o), "high": float(h), "low": float(l), "close": float(c)}
+                    for ts, o, h, l, c in zip(data.index, data["Open"], data["High"], data["Low"], data["Close"])
+                    if pd.notna(o) and pd.notna(h) and pd.notna(l) and pd.notna(c)
+                ]
+            else:  # Line chart
+                chart_data = [
+                    {"time": int(ts.timestamp()), "value": float(v)}
+                    for ts, v in zip(data.index, data["Close"])
+                    if pd.notna(v)
+                ]
+                
+            if not chart_data:
+                st.error("No valid price data found")
+                st.stop()
+                
+        except Exception as e:
+            st.error(f"Error processing chart data: {str(e)}")
+            st.stop()
 
-    ma_data = None
-    if show_ma and chart_type != "Bar":
-        ma_data = [
-            {"time": int(ts.timestamp()), "value": float(v)}
-            for ts, v in zip(data.index, data["MA20"])
-        ]
+        ma_data = None
+        if show_ma and chart_type != "Bar" and "MA20" in data.columns:
+            ma_data = [
+                {"time": int(ts.timestamp()), "value": float(v)}
+                for ts, v in zip(data.index, data["MA20"])
+                if pd.notna(v)
+            ]
 
-    forecast_data = None
-    if forecast_series is not None:
-        forecast_data = [
-            {"time": int(ts.timestamp()), "value": float(v)}
-            for ts, v in forecast_series.items()
-        ]
+        forecast_data = None
+        if forecast_series is not None:
+            forecast_data = [
+                {"time": int(ts.timestamp()), "value": float(v)}
+                for ts, v in forecast_series.items()
+                if pd.notna(v)
+            ]
 
-    payload = json.dumps(
-        {
-            "series_type": chart_type.lower(),
-            "chart_data": chart_data,
-            "ma_data": ma_data,
-            "forecast_data": forecast_data,
-            "enable_realtime": enable_realtime,
-            "ws_token": finnhub_token,
-            "ticker": ticker.split(".")[0],
-            "indicators": indicator_payloads,
-        }
-    )
+        payload = json.dumps(
+            {
+                "series_type": chart_type.lower(),
+                "chart_data": chart_data,
+                "ma_data": ma_data,
+                "forecast_data": forecast_data,
+                "enable_realtime": enable_realtime,
+                "ws_token": finnhub_token,
+                "ticker": ticker.split(".")[0],
+                "indicators": indicator_payloads,
+            }
+        )
 
-    html_content = f"""
-    <style>
-    .toolbar {{
-        position:absolute;
-        top:10px;
-        left:10px;
-        z-index:1000;
-        background:rgba(255,255,255,0.85);
-        border-radius:4px;
-        padding:4px;
-        font-family:sans-serif;
-    }}
-    .toolbar button {{
-        margin:2px;
-        padding:4px 6px;
-        font-size:12px;
-        cursor:pointer;
-    }}
-    </style>
-    <div style='position:relative;width:100%;height:500px;'>
-        <div id='tv_chart' style='width:100%;height:500px;'></div>
-        <div id='toolbar' class='toolbar'>
-            <button id='btnLine'>Trend</button>
-            <button id='btnHLine'>H&nbsp;Line</button>
-            <button id='btnFib'>Fib</button>
-            <button id='btnClear'>Clear</button>
+        html_content = f"""
+        <style>
+        .toolbar {{
+            position:absolute;
+            top:10px;
+            left:10px;
+            z-index:1000;
+            background:rgba(45,45,45,0.95);
+            border-radius:8px;
+            padding:8px;
+            font-family:Arial, sans-serif;
+            border:1px solid #ff6600;
+        }}
+        .toolbar button {{
+            margin:4px;
+            padding:6px 12px;
+            font-size:12px;
+            cursor:pointer;
+            background:#ff6600;
+            color:white;
+            border:none;
+            border-radius:4px;
+            font-weight:bold;
+        }}
+        .toolbar button:hover {{
+            background:#ffaa00;
+        }}
+        </style>
+        <div style='position:relative;width:100%;height:500px;background:#2d2d2d;border-radius:8px;'>
+            <div id='tv_chart' style='width:100%;height:500px;'></div>
+            <div id='toolbar' class='toolbar'>
+                <button id='btnLine'>Trend</button>
+                <button id='btnHLine'>H Line</button>
+                <button id='btnFib'>Fib</button>
+                <button id='btnClear'>Clear</button>
+            </div>
         </div>
-    </div>
-    <script src='https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js'></script>
-    <script>
-    const container = document.getElementById('tv_chart');
-    const chart = LightweightCharts.createChart(container, {{
-        layout: {{ backgroundColor: '#f4f4f4', textColor: '#333' }},
-        grid: {{ vertLines: {{ color: '#e1e3e8' }}, horzLines: {{ color: '#e1e3e8' }} }},
-        width: container.clientWidth,
-        height: 500,
-        timeScale: {{ borderVisible: false }},
-        rightPriceScale: {{ borderVisible: false }},
-    }});
+        <script src='https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js'></script>
+        <script>
+        try {{
+            const container = document.getElementById('tv_chart');
+            const chart = LightweightCharts.createChart(container, {{
+                layout: {{ backgroundColor: '#2d2d2d', textColor: '#ffffff' }},
+                grid: {{ vertLines: {{ color: '#404040' }}, horzLines: {{ color: '#404040' }} }},
+                width: container.clientWidth,
+                height: 500,
+                timeScale: {{ borderVisible: false, timeVisible: true }},
+                rightPriceScale: {{ borderVisible: false }},
+            }});
 
-    const payload = {payload};
-    const enableRealtime = payload.enable_realtime && payload.ws_token;
+            const payload = {payload};
+            const enableRealtime = payload.enable_realtime && payload.ws_token;
 
-    let mainSeries;
-    switch(payload.series_type) {{
-        case 'candlestick':
-            mainSeries = chart.addCandlestickSeries();
-            break;
-        case 'bar':
-            mainSeries = chart.addBarSeries();
-            break;
-        default:
-            mainSeries = chart.addLineSeries();
-    }}
-    mainSeries.setData(payload.chart_data);
-
-    // ---------- Drawing tools ----------
-    const drawings = [];
-    let drawingMode = null;
-    let firstPoint = null;
-    document.getElementById('btnLine').onclick = () => {{ drawingMode = 'line'; firstPoint=null; }};
-    document.getElementById('btnHLine').onclick = () => {{ drawingMode = 'hline'; firstPoint=null; }};
-    document.getElementById('btnFib').onclick = () => {{ drawingMode = 'fib'; firstPoint=null; }};
-    document.getElementById('btnClear').onclick = () => {{ drawings.forEach(s => chart.removeSeries(s)); drawings.length = 0; }};
-
-    chart.subscribeClick(param => {{
-        if (!drawingMode || param.time === undefined || param.price === undefined) return;
-        if (!firstPoint) {{
-            firstPoint = param;
-            return;
-        }}
-        const leftTime = payload.chart_data[0].time;
-        const rightTime = payload.chart_data[payload.chart_data.length-1].time;
-        switch(drawingMode) {{
-            case 'line': {{
-                const s = chart.addLineSeries({{ color: 'red', lineWidth: 1 }});
-                s.setData([{{ time:firstPoint.time, value:firstPoint.price }}, {{ time:param.time, value:param.price }}]);
-                drawings.push(s);
-                break;
+            let mainSeries;
+            switch(payload.series_type) {{
+                case 'candlestick':
+                    mainSeries = chart.addCandlestickSeries({{
+                        upColor: '#00ff88',
+                        downColor: '#ff4444',
+                        borderVisible: false,
+                        wickUpColor: '#00ff88',
+                        wickDownColor: '#ff4444'
+                    }});
+                    break;
+                case 'bar':
+                    mainSeries = chart.addBarSeries({{
+                        upColor: '#00ff88',
+                        downColor: '#ff4444'
+                    }});
+                    break;
+                default:
+                    mainSeries = chart.addLineSeries({{
+                        color: '#ff6600',
+                        lineWidth: 2
+                    }});
             }}
-            case 'hline': {{
-                const s = chart.addLineSeries({{ color: 'blue', lineWidth: 1 }});
-                s.setData([{{ time:leftTime, value:firstPoint.price }}, {{ time:rightTime, value:firstPoint.price }}]);
-                drawings.push(s);
-                break;
+            
+            if (payload.chart_data && payload.chart_data.length > 0) {{
+                mainSeries.setData(payload.chart_data);
+            }} else {{
+                console.error('No chart data available');
             }}
-            case 'fib': {{
-                const minP = Math.min(firstPoint.price, param.price);
-                const maxP = Math.max(firstPoint.price, param.price);
-                const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-                levels.forEach(lvl => {{
-                    const p = maxP - (maxP - minP) * lvl;
-                    const s = chart.addLineSeries({{ color: '#FFA500', lineWidth: 1, lineStyle: 2 }});
-                    s.setData([{{ time:firstPoint.time, value:p }}, {{ time:param.time, value:p }}]);
-                    drawings.push(s);
+
+            // ---------- Drawing tools ----------
+            const drawings = [];
+            let drawingMode = null;
+            let firstPoint = null;
+            document.getElementById('btnLine').onclick = () => {{ drawingMode = 'line'; firstPoint=null; }};
+            document.getElementById('btnHLine').onclick = () => {{ drawingMode = 'hline'; firstPoint=null; }};
+            document.getElementById('btnFib').onclick = () => {{ drawingMode = 'fib'; firstPoint=null; }};
+            document.getElementById('btnClear').onclick = () => {{ drawings.forEach(s => chart.removeSeries(s)); drawings.length = 0; }};
+
+            chart.subscribeClick(param => {{
+                if (!drawingMode || param.time === undefined || param.price === undefined) return;
+                if (!firstPoint) {{
+                    firstPoint = param;
+                    return;
+                }}
+                const leftTime = payload.chart_data[0].time;
+                const rightTime = payload.chart_data[payload.chart_data.length-1].time;
+                switch(drawingMode) {{
+                    case 'line': {{
+                        const s = chart.addLineSeries({{ color: 'red', lineWidth: 1 }});
+                        s.setData([{{ time:firstPoint.time, value:firstPoint.price }}, {{ time:param.time, value:param.price }}]);
+                        drawings.push(s);
+                        break;
+                    }}
+                    case 'hline': {{
+                        const s = chart.addLineSeries({{ color: 'blue', lineWidth: 1 }});
+                        s.setData([{{ time:leftTime, value:firstPoint.price }}, {{ time:rightTime, value:firstPoint.price }}]);
+                        drawings.push(s);
+                        break;
+                    }}
+                    case 'fib': {{
+                        const minP = Math.min(firstPoint.price, param.price);
+                        const maxP = Math.max(firstPoint.price, param.price);
+                        const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+                        levels.forEach(lvl => {{
+                            const p = maxP - (maxP - minP) * lvl;
+                            const s = chart.addLineSeries({{ color: '#FFA500', lineWidth: 1, lineStyle: 2 }});
+                            s.setData([{{ time:firstPoint.time, value:p }}, {{ time:param.time, value:p }}]);
+                            drawings.push(s);
+                        }});
+                        break;
+                    }}
+                }}
+                firstPoint = null;
+                drawingMode = null;
+            }});
+            // ---------- End Drawing tools ----------
+
+            // Add technical indicators as separate line series
+            if (payload.indicators) {{
+                payload.indicators.forEach(ind => {{
+                    const series = chart.addLineSeries({{ color: ind.color || 'grey', lineWidth: 1 }});
+                    series.setData(ind.data);
                 }});
-                break;
             }}
-        }}
-        firstPoint = null;
-        drawingMode = null;
-    }});
-    // ---------- End Drawing tools ----------
 
-    // Add technical indicators as separate line series
-    if (payload.indicators) {{
-        payload.indicators.forEach(ind => {{
-            const series = chart.addLineSeries({{ color: ind.color || 'grey', lineWidth: 1 }});
-            series.setData(ind.data);
-        }});
-    }}
-
-    if (enableRealtime) {{
-        const ws = new WebSocket(`wss://ws.finnhub.io?token=${{payload.ws_token}}`);
-        ws.addEventListener('open', () => {{
-            ws.send(JSON.stringify({{ type: 'subscribe', symbol: payload.ticker }}));
-        }});
-        ws.addEventListener('message', (event) => {{
-            const msg = JSON.parse(event.data);
-            if (msg.data) {{
-                msg.data.forEach(pt => {{
-                    // Finnhub returns trade ticks; update last value
-                    const updateObj = payload.series_type === 'candlestick' || payload.series_type === 'bar'
-                        ? {{ time: Math.floor(pt.t/1000), open: pt.p, high: pt.p, low: pt.p, close: pt.p }}
-                        : {{ time: Math.floor(pt.t/1000), value: pt.p }};
-                    mainSeries.update(updateObj);
+            if (enableRealtime) {{
+                const ws = new WebSocket(`wss://ws.finnhub.io?token=${{payload.ws_token}}`);
+                ws.addEventListener('open', () => {{
+                    ws.send(JSON.stringify({{ type: 'subscribe', symbol: payload.ticker }}));
+                }});
+                ws.addEventListener('message', (event) => {{
+                    const msg = JSON.parse(event.data);
+                    if (msg.data) {{
+                        msg.data.forEach(pt => {{
+                            // Finnhub returns trade ticks; update last value
+                            const updateObj = payload.series_type === 'candlestick' || payload.series_type === 'bar'
+                                ? {{ time: Math.floor(pt.t/1000), open: pt.p, high: pt.p, low: pt.p, close: pt.p }}
+                                : {{ time: Math.floor(pt.t/1000), value: pt.p }};
+                            mainSeries.update(updateObj);
+                        }});
+                    }}
                 }});
             }}
-        }});
-    }}
 
-    if (payload.ma_data) {{
-        const maSeries = chart.addLineSeries({{ color: 'orange', lineWidth: 1, lineStyle: 1 }});
-        maSeries.setData(payload.ma_data);
-    }}
+            if (payload.ma_data) {{
+                const maSeries = chart.addLineSeries({{ color: 'orange', lineWidth: 1, lineStyle: 1 }});
+                maSeries.setData(payload.ma_data);
+            }}
 
-    if (payload.forecast_data) {{
-        const forecastSeries = chart.addLineSeries({{ color: 'green', lineWidth: 1, lineStyle: 2 }});
-        forecastSeries.setData(payload.forecast_data);
-    }}
+            if (payload.forecast_data) {{
+                const forecastSeries = chart.addLineSeries({{ color: 'green', lineWidth: 1, lineStyle: 2 }});
+                forecastSeries.setData(payload.forecast_data);
+            }}
 
-    window.addEventListener('resize', () => {{
-        chart.applyOptions({{ width: container.clientWidth }});
-    }});
-    </script>
-    """
+            window.addEventListener('resize', () => {{
+                chart.applyOptions({{ width: container.clientWidth }});
+            }});
+        }} catch (error) {{
+            console.error('Chart rendering error:', error);
+            document.getElementById('tv_chart').innerHTML = '<div style="color:#ff4444;padding:20px;text-align:center;">Chart loading error. Please refresh the page.</div>';
+        }}
+        </script>
+        """
 
-    components.html(html_content, height=520)
+        components.html(html_content, height=520)
 
-    st.markdown("#### 🔍 Data Preview")
-    st.dataframe(data.tail(10), use_container_width=True, height=200)
+        st.markdown("#### 🔍 Data Preview")
+        st.dataframe(data.tail(10), use_container_width=True, height=200)
 
-    st.download_button(
-        "📥 Download CSV",
-        data.to_csv().encode('utf-8'),
-        file_name=f"{ticker}_data.csv",
-        mime='text/csv'
-    )
+        st.download_button(
+            "📥 Download CSV",
+            data.to_csv().encode('utf-8'),
+            file_name=f"{ticker}_data.csv",
+            mime='text/csv'
+        )
 
 with right:
     av = st.session_state.get('active_view')
