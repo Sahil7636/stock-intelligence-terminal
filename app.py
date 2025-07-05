@@ -45,6 +45,12 @@ show_ma = st.sidebar.checkbox("Show 20-Day MA", True)
 use_forecast = st.sidebar.checkbox("🔮 Predict Future with ARIMA")
 forecast_days = st.sidebar.slider("Days to Forecast", 1, 30, 7) if use_forecast else 0
 
+# Real-time WebSocket options
+enable_realtime = st.sidebar.checkbox("🔌 Real-Time Updates (Finnhub WS)")
+finnhub_token = ""
+if enable_realtime:
+    finnhub_token = st.sidebar.text_input("Finnhub API Token", value="demo", type="password")
+
 # ---------------- Cached historical data ----------------
 @st.cache_data(ttl=3600)
 def get_history_data(ticker: str, period: str) -> pd.DataFrame:
@@ -172,6 +178,9 @@ with left:
             "chart_data": chart_data,
             "ma_data": ma_data,
             "forecast_data": forecast_data,
+            "enable_realtime": enable_realtime,
+            "ws_token": finnhub_token,
+            "ticker": ticker.split(".")[0],
         }
     )
 
@@ -190,6 +199,9 @@ with left:
     }});
 
     const payload = {payload};
+
+    const enableRealtime = payload.enable_realtime && payload.ws_token;
+
     let mainSeries;
     switch(payload.series_type) {{
         case 'candlestick':
@@ -202,6 +214,25 @@ with left:
             mainSeries = chart.addLineSeries();
     }}
     mainSeries.setData(payload.chart_data);
+
+    if (enableRealtime) {{
+        const ws = new WebSocket(`wss://ws.finnhub.io?token=${payload.ws_token}`);
+        ws.addEventListener('open', () => {{
+            ws.send(JSON.stringify({{ type: 'subscribe', symbol: payload.ticker }}));
+        }});
+        ws.addEventListener('message', (event) => {{
+            const msg = JSON.parse(event.data);
+            if (msg.data) {{
+                msg.data.forEach(pt => {{
+                    // Finnhub returns trade ticks; update last value
+                    const updateObj = payload.series_type === 'candlestick' || payload.series_type === 'bar'
+                        ? {{ time: Math.floor(pt.t/1000), open: pt.p, high: pt.p, low: pt.p, close: pt.p }}
+                        : {{ time: Math.floor(pt.t/1000), value: pt.p }};
+                    mainSeries.update(updateObj);
+                }});
+            }
+        }});
+    }}
 
     if (payload.ma_data) {{
         const maSeries = chart.addLineSeries({{ color: 'orange', lineWidth: 1, lineStyle: 1 }});
