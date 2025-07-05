@@ -10,7 +10,7 @@
 
     ## 🚀 Live Demo 
 
-    - Link to check out (https://stock-intelligence-terminal-jw4mnzh4es7nty7dkuganf.streamlit.app/)
+    - Link to check out (https://stock-intelligence-terminal-jw4mnzh4es7nty7dkuganf.streamlit.app)
 
 
     ## 🔧 Features
