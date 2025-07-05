@@ -6,6 +6,8 @@ from statsmodels.tsa.arima.model import ARIMA
 from datetime import timedelta
 import asyncio
 import aiohttp
+import os
+from pathlib import Path
 
 st.set_page_config(page_title="📈 Stock Intelligence Terminal", layout="wide")
 
@@ -41,10 +43,30 @@ show_ma = st.sidebar.checkbox("Show 20-Day MA", True)
 use_forecast = st.sidebar.checkbox("🔮 Predict Future with ARIMA")
 forecast_days = st.sidebar.slider("Days to Forecast", 1, 30, 7) if use_forecast else 0
 
+# ---------------- Cached historical data ----------------
+@st.cache_data(ttl=3600)
+def get_history_data(ticker: str, period: str) -> pd.DataFrame:
+    """Return historical price data, cached on disk as parquet (fastparquet engine)."""
+    cache_dir = Path("data_cache")
+    cache_dir.mkdir(exist_ok=True)
+    file_path = cache_dir / f"{ticker}_{period}.parquet"
+
+    if file_path.exists():
+        try:
+            return pd.read_parquet(file_path)
+        except Exception:
+            file_path.unlink(missing_ok=True)  # remove corrupt cache and refetch
+
+    df = yf.download(ticker, period=period, progress=False)
+    if not df.empty:
+        df.to_parquet(file_path, engine="fastparquet")
+    return df
+
 # ---------------- Fetch Data ----------------
 stock = yf.Ticker(ticker)
 info = stock.info
-data = stock.history(period=period)
+# Replace direct yfinance history call with cached version
+data = get_history_data(ticker, period)
 data = data.asfreq('B')
 data["Close"].interpolate(method='linear', inplace=True)
 data["MA20"] = data["Close"].rolling(20).mean()
