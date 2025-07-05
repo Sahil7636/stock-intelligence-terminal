@@ -1,8 +1,5 @@
 streamlit
 yfinance
 pandas
-TA-Lib
-aiohttp
-fastparquet
-numpy
-requests
+plotly
+statsmodels
