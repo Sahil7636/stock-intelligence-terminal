@@ -8,8 +8,9 @@
     - 📋 Analyze key financial ratios like PE, PB, ROE, ROA, and more  
     - 🌐 Compare stocks from India (NSE) and USA (NASDAQ)
 
-    ## 🚀 Live Demo soon
+    ## 🚀 Live Demo 
 
+    - Link to check out (https://stock-intelligence-terminal-jw4mnzh4es7nty7dkuganf.streamlit.app/)
 
 
     ## 🔧 Features
