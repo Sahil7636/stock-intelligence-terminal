@@ -10,6 +10,10 @@ import streamlit.components.v1 as components
 import pandas as pd
 from statsmodels.tsa.arima.model import ARIMA
 from datetime import timedelta
+import datetime as dt
+
+# For news
+import requests
 import asyncio
 import aiohttp
 import os
@@ -48,6 +52,62 @@ if 'cmd_ticker' not in st.session_state:
     st.session_state['cmd_ticker'] = None
 if 'active_view' not in st.session_state:
     st.session_state['active_view'] = None
+
+# ---------------- Screener data helpers ----------------
+@st.cache_data(ttl=3600)
+def get_sp500_universe():
+    url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
+    return pd.read_csv(url)
+
+# Async fetch of ticker info
+async def _fetch_info(session, t):
+    try:
+        info = await asyncio.to_thread(lambda: yf.Ticker(t).info)
+        return t, info
+    except Exception:
+        return t, None
+
+async def _gather_infos(tickers):
+    tasks = [asyncio.create_task(_fetch_info(None, t)) for t in tickers]
+    return await asyncio.gather(*tasks)
+
+@st.cache_data(ttl=3600)
+def get_screener_data():
+    """Return DataFrame of SP500 tickers with basic metrics."""
+    universe = get_sp500_universe()
+    tickers = universe['Symbol'].tolist()
+    infos = asyncio.run(_gather_infos(tickers))
+    rows = []
+    for t, info in infos:
+        if not info:
+            continue
+        rows.append({
+            'Ticker': t,
+            'Name': info.get('shortName'),
+            'Sector': info.get('sector'),
+            'MarketCap': info.get('marketCap'),
+            'PE': info.get('trailingPE'),
+            'Price': info.get('currentPrice'),
+            'DividendYield': info.get('dividendYield'),
+        })
+    df = pd.DataFrame(rows)
+    return df
+
+# ---------------- News helper ----------------
+@st.cache_data(ttl=300)
+def get_company_news(symbol: str, token: str):
+    if not token:
+        return []
+    today = dt.date.today()
+    frm = today - dt.timedelta(days=30)
+    url = f"https://finnhub.io/api/v1/company-news?symbol={symbol}&from={frm}&to={today}&token={token}"
+    try:
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return []
 
 cmd_input = st.text_input("💬 Command", value=st.session_state['command'], placeholder=COMMAND_PLACEHOLDER)
 
@@ -492,3 +552,40 @@ with right:
             st.dataframe(stock.cashflow.T, use_container_width=True)
         except Exception:
             st.error("Cash flow statement not available.")
+
+# ---------------- Screener View ----------------
+av = st.session_state.get('active_view')
+if av == 'SC':
+    st.header("🗂 Stock Screener (S&P 500)")
+
+    df = get_screener_data()
+
+    sectors = sorted(df['Sector'].dropna().unique())
+    sector_sel = st.multiselect('Sector', options=sectors, default=sectors)
+
+    mc_min, mc_max = st.slider('Market Cap ($B)', 0.0, 1000.0, (0.0, 1000.0))
+    pe_min, pe_max = st.slider('PE Ratio', 0.0, 100.0, (0.0, 100.0))
+
+    df_filt = df[
+        (df['Sector'].isin(sector_sel)) &
+        (df['MarketCap'] / 1e9 >= mc_min) & (df['MarketCap'] / 1e9 <= mc_max) &
+        (df['PE'].fillna(0) >= pe_min) & (df['PE'].fillna(0) <= pe_max)
+    ]
+
+    st.dataframe(df_filt.sort_values('MarketCap', ascending=False), use_container_width=True)
+
+    st.stop()
+
+# ---------------- News View ----------------
+if av == 'NW':
+    st.header(f"📰 Recent News - {ticker}")
+    news_items = get_company_news(ticker, finnhub_token)
+    if not news_items:
+        st.info("No news available or invalid token.")
+    else:
+        for item in news_items[:20]:
+            dt_ts = dt.datetime.fromtimestamp(item.get('datetime', 0)).strftime('%Y-%m-%d %H:%M')
+            st.markdown(f"**{item.get('headline')}**  ")
+            st.markdown(f"*{dt_ts}* - [{item.get('source')}]({item.get('url')})  ")
+            st.markdown("---")
+    st.stop()
