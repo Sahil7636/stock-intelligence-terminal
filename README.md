@@ -11,7 +11,7 @@
 
 ## 🚀 Live Demo
 
-🔗 [Click here to open the app](http://localhost:8501/)
+🔗 [Click here to open the app](https://stock-intelligence-terminal-jw4mnzh4es7nty7dkuganf.streamlit.app/)
 
 
 
